@@ -7,7 +7,7 @@ TELEGRAM_BOT_TOKEN=os.environ['TELEGRAM_BOT_TOKEN']
 TELEGRAM_CHAT_ID=os.environ['TELEGRAM_CHAT_ID']
 MIN_MC=float(os.getenv('MIN_MC','50000')); MAX_MC=float(os.getenv('MAX_MC','500000'))
 MIN_LIQ=float(os.getenv('MIN_LIQUIDITY','20000')); MIN_VOL=float(os.getenv('MIN_VOLUME','50000'))
-MIN_SCORE=int(os.getenv('MIN_SCORE','80')); POLL_SECONDS=int(os.getenv('POLL_SECONDS','60'))
+MIN_SCORE=int(os.getenv('MIN_SCORE','80')); POLL_SECONDS=int(os.getenv('POLL_SECONDS','120'))
 BASE='https://public-api.birdeye.so'; HEAD={'X-API-KEY':BIRDEYE_API_KEY,'x-chain':'solana'}
 seen=set(); logging.basicConfig(level=logging.INFO,format='%(asctime)s %(levelname)s %(message)s')
 
