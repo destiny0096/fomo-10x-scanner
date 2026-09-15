@@ -56,20 +56,28 @@ def alert(t,m,s,mc,liq,vol,why):
 
 async def scan(session):
     d=await get(session,'/defi/v2/tokens/new_listing',{'limit':20,'meme_platform_enabled':'true'})
-    toks=get_items(d); fresh=[t for t in toks if (t.get('address') or t.get('tokenAddress')) and (t.get('address') or t.get('tokenAddress')) not in seen]
-    if not fresh: return
-    for t in fresh: seen.add(t.get('address') or t.get('tokenAddress'))
-    addrs=[t.get('address') or t.get('tokenAddress') for t in fresh][:20]
-    markets=[]
-for a in addrs:
-    m=await get(session,'/defi/v3/token/market-data',{'address':a,'ui_amount_mode':'scaled'})
-    markets.append(m)
-    
-    by={m.get('address'):m for m in markets if m.get('address')}
+    toks=get_items(d)
+    fresh=[t for t in toks if (t.get('address') or t.get('tokenAddress')) and (t.get('address') or t.get('tokenAddress')) not in seen]
+    if not fresh: return 
     for t in fresh:
-        a=t.get('address') or t.get('tokenAddress'); m=by.get(a,{**t,'address':a}); s,mc,liq,vol,why=score(m)
+        seen.add(t.get('address') or t.get('tokenAddress'))
+
+    addrs=[t.get('address') or t.get('tokenAddress') for t in fresh][:20]
+
+    markets=[]
+    for a in addrs:
+        m=await get(session,'/defi/v3/token/market-data',{'address':a,'ui_amount_mode':'scaled'})
+        markets.append(m)
+
+    by={m.get('address'):m for m in markets if m.get('address')}
+
+    for t in fresh:
+        a=t.get('address') or t.get('tokenAddress')
+        m=by.get(a,{**t,'address':a})
+        s,mc,liq,vol,why=score(m)
         if MIN_MC<=mc<=MAX_MC and liq>=MIN_LIQ and vol>=MIN_VOL and s>=MIN_SCORE:
-            await tg(session,alert(t,m,s,mc,liq,vol,why)); logging.info('alert %s %s',t.get('symbol'),a)
+            await tg(session,alert(t,m,s,mc,liq,vol,why))
+            logging.info('alert %s %s',t.get('symbol'),a)
 
 async def main():
     async with aiohttp.ClientSession() as session:
