@@ -60,8 +60,11 @@ async def scan(session):
     if not fresh: return
     for t in fresh: seen.add(t.get('address') or t.get('tokenAddress'))
     addrs=[t.get('address') or t.get('tokenAddress') for t in fresh][:20]
-    md=await get(session,'/defi/v3/token/market-data/multiple',{'list_address':','.join(addrs),'ui_amount_mode':'scaled'})
-    markets=get_items(md)
+    markets=[]
+for a in addrs:
+    m=await get(session,'/defi/v3/token/market-data',{'address':a,'ui_amount_mode':'scaled'})
+    markets.append(m)
+    
     by={m.get('address'):m for m in markets if m.get('address')}
     for t in fresh:
         a=t.get('address') or t.get('tokenAddress'); m=by.get(a,{**t,'address':a}); s,mc,liq,vol,why=score(m)
