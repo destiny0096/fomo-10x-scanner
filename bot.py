@@ -77,7 +77,7 @@ for a in addrs:
 
 by = {m.get('address'): m for m in markets}
 
-    for t in fresh:
+for t in fresh:
         a=t.get('address') or t.get('tokenAddress')
         m=by.get(a,{**t,'address':a})
         s,mc,liq,vol,why=score(m)
