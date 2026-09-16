@@ -64,12 +64,18 @@ async def scan(session):
 
     addrs=[t.get('address') or t.get('tokenAddress') for t in fresh][:20]
 
-    markets=[]
-    for a in addrs:
-        m=await get(session,'/defi/v3/token/market-data',{'address':a,'ui_amount_mode':'scaled'})
-        markets.append(m)
+    markets = []
 
-    by={m.get('address'):m for m in markets if m.get('address')}
+for a in addrs:
+    await asyncio.sleep(2)
+    m = await get(
+        session,
+        '/defi/v3/token/market-data',
+        {'address': a, 'ui_amount_mode': 'scaled'}
+    )
+    markets.append(m)
+
+by = {m.get('address'): m for m in markets}
 
     for t in fresh:
         a=t.get('address') or t.get('tokenAddress')
