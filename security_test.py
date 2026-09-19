@@ -111,7 +111,10 @@ async def main():
 
                 if extension_type == 13:
                     print("⚠️ PERMANENT DELEGATE: ACTIVE")
-
+                    
+                if extension_type == 9:
+                    print("🚫 NON-TRANSFERABLE: ACTIVE")
+  
                 if extension_type == 0:
                     break
 
