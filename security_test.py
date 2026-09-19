@@ -75,7 +75,19 @@ async def main():
         print("⚠️ MINT AUTHORITY: ACTIVE")
     else:
         print("❌ Unknown mint authority value:", authority_option)
+    # Freeze Authority is stored at bytes 46-49
+    if len(decoded) < 50:
+        print("❌ Account data is too short to contain Freeze Authority")
+        return
 
+    freeze_authority_option = struct.unpack("<I", decoded[46:50])[0]
+
+    if freeze_authority_option == 0:
+        print("🔒 FREEZE AUTHORITY: DISABLED")
+    elif freeze_authority_option == 1:
+        print("⚠️ FREEZE AUTHORITY: ACTIVE")
+    else:
+        print("❌ Unknown freeze authority value:", freeze_authority_option)
 
 if __name__ == "__main__":
     asyncio.run(main())
