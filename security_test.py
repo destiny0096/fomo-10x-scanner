@@ -55,8 +55,10 @@ async def main():
 
     decoded = base64.b64decode(raw_data)
 
-    if len(decoded) != 82:
-        print("❌ Account is not a standard 82-byte Token Mint")
+    # Mint Authority is stored in the first 36 bytes
+    # 4-byte option + 32-byte public key
+    if len(decoded) < 36:
+        print("❌ Account data is too short to contain Mint Authority")
         print("Account size:", len(decoded))
         return
 
@@ -64,6 +66,8 @@ async def main():
 
     print("✅ Token Mint confirmed")
     print("CA:", TOKEN_CA)
+    print("Token Program:", owner)
+    print("Account size:", len(decoded))
 
     if authority_option == 0:
         print("🔒 MINT AUTHORITY: DISABLED")
@@ -75,3 +79,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+    
