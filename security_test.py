@@ -126,7 +126,82 @@ async def main():
 
             if not found:
                 print("None detected")
-                
+            
+    # Check Transfer Fee Config
+    if owner == "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb":
+        offset = 166
+
+        while offset + 4 <= len(decoded):
+            extension_type = struct.unpack(
+                "<H", decoded[offset:offset + 2]
+            )[0]
+
+            extension_length = struct.unpack(
+                "<H", decoded[offset + 2:offset + 4]
+            )[0]
+
+            if extension_type == 0:
+                break
+
+            if offset + 4 + extension_length > len(decoded):
+                break
+
+            if extension_type == 1:
+                extension = decoded[
+                    offset + 4:offset + 4 + extension_length
+                ]
+
+                if len(extension) != 108:
+                    print("❌ Invalid Transfer Fee Config length")
+                    break
+
+                transfer_fee_authority = extension[0:32]
+                withdraw_authority = extension[32:64]
+
+                older_max_fee = struct.unpack(
+                    "<Q", extension[80:88]
+                )[0]
+
+                older_bps = struct.unpack(
+                    "<H", extension[88:90]
+                )[0]
+
+                newer_max_fee = struct.unpack(
+                    "<Q", extension[98:106]
+                )[0]
+
+                newer_bps = struct.unpack(
+                    "<H", extension[106:108]
+                )[0]
+
+                decimals = decoded[44]
+
+                print("💰 TRANSFER FEE CONFIG:")
+                print(f"Older fee: {older_bps / 100:.2f}%")
+                print(
+                    f"Older maximum fee: "
+                    f"{older_max_fee / (10 ** decimals):.8f}"
+                )
+                print(f"Newer fee: {newer_bps / 100:.2f}%")
+                print(
+                    f"Newer maximum fee: "
+                    f"{newer_max_fee / (10 ** decimals):.8f}"
+                )
+
+                if any(transfer_fee_authority):
+                    print("⚠️ Transfer Fee Authority: ACTIVE")
+                else:
+                    print("🔒 Transfer Fee Authority: DISABLED")
+
+                if any(withdraw_authority):
+                    print("⚠️ Withdraw Authority: ACTIVE")
+                else:
+                    print("🔒 Withdraw Authority: DISABLED")
+
+                break
+
+            offset += 4 + extension_length     
+                    
                 
 if __name__ == "__main__":
     asyncio.run(main())
