@@ -88,7 +88,46 @@ async def main():
         print("⚠️ FREEZE AUTHORITY: ACTIVE")
     else:
         print("❌ Unknown freeze authority value:", freeze_authority_option)
+    
 
+         # Check for Token-2022 extensions
+    if owner == "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb":
+        print("🔍 TOKEN-2022 EXTENSIONS:")
+
+        if len(decoded) <= 166:
+            print("None detected")
+        else:
+            offset = 166
+            found = False
+
+            while offset + 4 <= len(decoded):
+                extension_type = struct.unpack(
+                    "<H", decoded[offset:offset + 2]
+                )[0]
+
+                extension_length = struct.unpack(
+                    "<H", decoded[offset + 2:offset + 4]
+                )[0]
+
+                if extension_type == 0:
+                    break
+
+                if offset + 4 + extension_length > len(decoded):
+                    print("❌ Invalid extension data")
+                    break
+
+                print(
+                    f"⚠️ Extension type {extension_type} "
+                    f"(length {extension_length})"
+                )
+
+                found = True
+                offset += 4 + extension_length
+
+            if not found:
+                print("None detected")
+                
+                
 if __name__ == "__main__":
     asyncio.run(main())
 
