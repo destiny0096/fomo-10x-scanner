@@ -109,6 +109,9 @@ async def main():
                     "<H", decoded[offset + 2:offset + 4]
                 )[0]
 
+                if extension_type == 13:
+                    print("⚠️ PERMANENT DELEGATE: ACTIVE")
+
                 if extension_type == 0:
                     break
 
