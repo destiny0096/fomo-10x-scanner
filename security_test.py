@@ -5,6 +5,8 @@ import struct
 
 TOKEN_CA = "AeDgbAv64t53GiBPemV2geVB1pZkdBLPumjn25HWXpUo"
 
+DEX_URL = f"https://api.dexscreener.com/latest/dex/tokens/{TOKEN_CA}"
+
 RPC_URL = "https://api.mainnet-beta.solana.com"
 
 TOKEN_PROGRAMS = {
@@ -27,9 +29,20 @@ async def main():
         ]
     }
 
-    async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession() as session:
         async with session.post(RPC_URL, json=payload) as response:
             data = await response.json()
+
+        async with session.get(DEX_URL) as dex_response:
+            dex_data = await dex_response.json()
+
+        print("🔎 DEXSCREENER POOLS FOUND:", len(dex_data.get("pairs", [])))
+
+    if "error" in data:
+        print("❌ RPC ERROR:", data["error"])
+        return
+
+        
 
     if "error" in data:
         print("❌ RPC ERROR:", data["error"])
