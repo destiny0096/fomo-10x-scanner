@@ -29,16 +29,12 @@ async def main():
         ]
     }
 
-            async with aiohttp.ClientSession() as 
-        session:
-                 async with session.post(RPC_URL, 
-         json=payload) as response:
-                     data = await response.json()
+                async with aiohttp.ClientSession() as session:
+        async with session.post(RPC_URL, json=payload) as response:
+            data = await response.json()
 
-                 async with session.get(DEX_URL) as 
-         dex_response:
-                     dex_data = await 
-         dex_response.json()
+        async with session.get(DEX_URL) as dex_response:
+            dex_data = await dex_response.json()
 
         print("🔎 DEXSCREENER POOLS FOUND:", len(dex_data.get("pairs", [])))
 
