@@ -29,20 +29,9 @@ async def main():
         ]
     }
 
-                async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession() as session:
         async with session.post(RPC_URL, json=payload) as response:
             data = await response.json()
-
-        async with session.get(DEX_URL) as dex_response:
-            dex_data = await dex_response.json()
-
-        print("🔎 DEXSCREENER POOLS FOUND:", len(dex_data.get("pairs", [])))
-
-    if "error" in data:
-        print("❌ RPC ERROR:", data["error"])
-        return
-
-        
 
     if "error" in data:
         print("❌ RPC ERROR:", data["error"])
@@ -88,6 +77,7 @@ async def main():
         print("⚠️ MINT AUTHORITY: ACTIVE")
     else:
         print("❌ Unknown mint authority value:", authority_option)
+
     # Freeze Authority is stored at bytes 46-49
     if len(decoded) < 50:
         print("❌ Account data is too short to contain Freeze Authority")
@@ -101,9 +91,8 @@ async def main():
         print("⚠️ FREEZE AUTHORITY: ACTIVE")
     else:
         print("❌ Unknown freeze authority value:", freeze_authority_option)
-    
 
-         # Check for Token-2022 extensions
+    # Check for Token-2022 extensions
     if owner == "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb":
         print("🔍 TOKEN-2022 EXTENSIONS:")
 
@@ -124,10 +113,10 @@ async def main():
 
                 if extension_type == 13:
                     print("⚠️ PERMANENT DELEGATE: ACTIVE")
-                    
+
                 if extension_type == 9:
                     print("🚫 NON-TRANSFERABLE: ACTIVE")
-  
+
                 if extension_type == 0:
                     break
 
@@ -145,7 +134,7 @@ async def main():
 
             if not found:
                 print("None detected")
-            
+
     # Check Transfer Fee Config
     if owner == "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb":
         offset = 166
@@ -219,10 +208,9 @@ async def main():
 
                 break
 
-            offset += 4 + extension_length     
-                    
-                
+            offset += 4 + extension_length
+
+
 if __name__ == "__main__":
     asyncio.run(main())
-
-    
+                    
