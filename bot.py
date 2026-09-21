@@ -231,20 +231,19 @@ async def scan(session):
             and vol >= MIN_VOL
             and s >= MIN_SCORE
         ):
-            security = await check_security(session, address)
+                        security = await check_security(session, address)
 
-await tg(
-    session,
-    alert(
-        pair,
-        s,
-        mc,
-        liq,
-        vol,
-        why
-    ) + f'\n\n🛡️ SECURITY\n{security_summary(security)}'
-)
-            
+            await tg(
+                session,
+                alert(
+                    pair,
+                    s,
+                    mc,
+                    liq,
+                    vol,
+                    why
+                ) + f'\n\n🛡️ SECURITY\n{security_summary(security)}'
+            )
 
             token = pair.get('baseToken') or {}
 
