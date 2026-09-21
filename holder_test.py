@@ -1,7 +1,7 @@
 import asyncio
 import aiohttp
 
-TOKEN_CA = "sdyKwWzC8EnriZWBBwm8YX25nKGmtQdZAHBEGLUpump"
+TOKEN_CA = "So11111111111111111111111111111111111111112"
 
 RPC_URL = "https://api.mainnet-beta.solana.com"
 
