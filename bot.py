@@ -3,7 +3,10 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 import aiohttp
+
 from security_test import check_security, security_summary
+from lp_test import check_lp_status, lp_status_text
+
 
 TELEGRAM_BOT_TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
 TELEGRAM_CHAT_ID = os.environ['TELEGRAM_CHAT_ID']
@@ -225,14 +228,18 @@ async def scan(session):
     for pair in best_pairs.values():
         s, mc, liq, vol, why = score(pair)
 
-        
         if (
             MIN_MC <= mc <= MAX_MC
             and liq >= MIN_LIQ
             and vol >= MIN_VOL
             and s >= MIN_SCORE
         ):
+            token = pair.get('baseToken') or {}
+            address = token.get('address')
+
             security = await check_security(session, address)
+
+            lp_status = await check_lp_status(session, address)
 
             await tg(
                 session,
@@ -243,17 +250,18 @@ async def scan(session):
                     liq,
                     vol,
                     why
-                ) + f'\n\n🛡️ SECURITY\n{security_summary(security)}'
+                )
+                + f'\n\n🛡️ SECURITY\n{security_summary(security)}'
+                + f'\n\n{lp_status_text(lp_status)}'
             )
 
-            token = pair.get('baseToken') or {}
-
             logging.info(
-                'ALERT %s %s score=%s',
+                'ALERT %s %s score=%s LP=%s',
                 token.get('symbol'),
                 token.get('address'),
-                s
-            )       
+                s,
+                lp_status
+            )
 
 
 async def main():
@@ -269,7 +277,4 @@ async def main():
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
-
-
-    
+    asyncio.run(main())                    
