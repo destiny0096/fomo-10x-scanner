@@ -3,7 +3,7 @@ import aiohttp
 import base64
 from solders.pubkey import Pubkey
 
-TOKEN_CA = "sdyKwWzC8EnriZWBBwm8YX25nKGmtqQdZAHBEGLUpump"
+TOKEN_CA = "So11111111111111111111111111111111111111112"
 
 RPC_URL = "https://api.mainnet-beta.solana.com"
 
