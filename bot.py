@@ -3,6 +3,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 import aiohttp
+from security_test import check_security, security_summary
 
 TELEGRAM_BOT_TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
 TELEGRAM_CHAT_ID = os.environ['TELEGRAM_CHAT_ID']
@@ -230,9 +231,19 @@ async def scan(session):
             and vol >= MIN_VOL
             and s >= MIN_SCORE
         ):
-            await tg(
-                session,
-                alert(pair, s, mc, liq, vol, why)
+            security = await check_security(session, address)
+
+await tg(
+    session,
+    alert(
+        pair,
+        s,
+        mc,
+        liq,
+        vol,
+        why
+    ) + f'\n\n🛡️ SECURITY\n{security_summary(security)}'
+)
             )
 
             token = pair.get('baseToken') or {}
