@@ -244,7 +244,7 @@ await tg(
         why
     ) + f'\n\n🛡️ SECURITY\n{security_summary(security)}'
 )
-            )
+            
 
             token = pair.get('baseToken') or {}
 
