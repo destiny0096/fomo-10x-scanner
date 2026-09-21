@@ -225,13 +225,14 @@ async def scan(session):
     for pair in best_pairs.values():
         s, mc, liq, vol, why = score(pair)
 
+        
         if (
             MIN_MC <= mc <= MAX_MC
             and liq >= MIN_LIQ
             and vol >= MIN_VOL
             and s >= MIN_SCORE
         ):
-                        security = await check_security(session, address)
+            security = await check_security(session, address)
 
             await tg(
                 session,
@@ -252,7 +253,7 @@ async def scan(session):
                 token.get('symbol'),
                 token.get('address'),
                 s
-            )
+            )       
 
 
 async def main():
