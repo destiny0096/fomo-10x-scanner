@@ -3,6 +3,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 import aiohttp
+from aiohttp import web
 
 from security_test import check_security, security_summary
 from lp_test import check_lp_status, lp_status_text
@@ -29,6 +30,39 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s %(levelname)s %(message)s'
 )
+
+
+async def health(request):
+    return web.Response(
+        text='FOMO 10X Scanner is running',
+        status=200
+    )
+
+
+async def start_health_server():
+    port = int(os.getenv('PORT', '3000'))
+
+    app = web.Application()
+    app.router.add_get('/', health)
+    app.router.add_get('/health', health)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+
+    site = web.TCPSite(
+        runner,
+        '0.0.0.0',
+        port
+    )
+
+    await site.start()
+
+    logging.info(
+        'Health server listening on port %s',
+        port
+    )
+
+    return runner
 
 
 async def get(session, path, params=None):
@@ -334,7 +368,16 @@ async def main():
             )
 
 
-if __name__ == '__main__':
-    asyncio.run(main())
+async def run():
+    runner = await start_health_server()
 
+    try:
+        await main()
+
+    finally:
+        await runner.cleanup()
+
+
+if __name__ == '__main__':
+    asyncio.run(run())
                     
