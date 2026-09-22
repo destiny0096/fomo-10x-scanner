@@ -6,6 +6,7 @@ import aiohttp
 
 from security_test import check_security, security_summary
 from lp_test import check_lp_status, lp_status_text
+from sell_route_test import check_sell_route, sell_route_text
 
 
 TELEGRAM_BOT_TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
@@ -22,6 +23,7 @@ BASE = 'https://api.dexscreener.com'
 HEAD = {}
 
 seen = set()
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -56,6 +58,7 @@ async def tg(session, text):
         },
         timeout=20
     ) as r:
+
         if r.status >= 400:
             raise RuntimeError(await r.text())
 
@@ -73,7 +76,11 @@ def money(x):
 
 
 def score(pair):
-    mc = float(pair.get('marketCap') or pair.get('fdv') or 0)
+    mc = float(
+        pair.get('marketCap')
+        or pair.get('fdv')
+        or 0
+    )
 
     liquidity_data = pair.get('liquidity') or {}
     liq = float(liquidity_data.get('usd') or 0)
@@ -121,14 +128,20 @@ def alert(pair, s, mc, liq, vol, why):
     symbol = base_token.get('symbol') or '?'
 
     created = pair.get('pairCreatedAt')
+
     age = 'unknown'
 
     if created:
         created_seconds = float(created) / 1000
+
         age_minutes = max(
             0,
-            (datetime.now(timezone.utc).timestamp() - created_seconds) / 60
+            (
+                datetime.now(timezone.utc).timestamp()
+                - created_seconds
+            ) / 60
         )
+
         age = f'{age_minutes:.0f} min'
 
     dex_url = pair.get(
@@ -159,12 +172,15 @@ async def scan(session):
     )
 
     if not isinstance(profiles, list):
-        logging.warning('Unexpected token profile response')
+        logging.warning(
+            'Unexpected token profile response'
+        )
         return
 
     solana_tokens = []
 
     for token in profiles:
+
         if token.get('chainId') != 'solana':
             continue
 
@@ -179,7 +195,9 @@ async def scan(session):
         solana_tokens.append(address)
 
     if not solana_tokens:
-        logging.info('No new Solana candidates found')
+        logging.info(
+            'No new Solana candidates found'
+        )
         return
 
     solana_tokens = solana_tokens[:30]
@@ -195,12 +213,15 @@ async def scan(session):
     )
 
     if not isinstance(pairs, list):
-        logging.warning('Unexpected token pair response')
+        logging.warning(
+            'Unexpected token pair response'
+        )
         return
 
     best_pairs = {}
 
     for pair in pairs:
+
         if pair.get('chainId') != 'solana':
             continue
 
@@ -211,21 +232,28 @@ async def scan(session):
             continue
 
         liquidity_data = pair.get('liquidity') or {}
-        liquidity = float(liquidity_data.get('usd') or 0)
+        liquidity = float(
+            liquidity_data.get('usd') or 0
+        )
 
         current = best_pairs.get(address)
 
         if current is None:
+
             best_pairs[address] = pair
+
         else:
+
             current_liquidity = float(
-                (current.get('liquidity') or {}).get('usd') or 0
+                (current.get('liquidity') or {}).get('usd')
+                or 0
             )
 
             if liquidity > current_liquidity:
                 best_pairs[address] = pair
 
     for pair in best_pairs.values():
+
         s, mc, liq, vol, why = score(pair)
 
         if (
@@ -234,15 +262,29 @@ async def scan(session):
             and vol >= MIN_VOL
             and s >= MIN_SCORE
         ):
+
             token = pair.get('baseToken') or {}
             address = token.get('address')
 
-            security = await check_security(session, address)
-
-            lp_status = await check_lp_status(session, address)
-
-            await tg(
+            # Security check
+            security = await check_security(
                 session,
+                address
+            )
+
+            # LP check
+            lp_status = await check_lp_status(
+                session,
+                address
+            )
+
+            # Sell route check
+            sell_status = await check_sell_route(
+                session,
+                address
+            )
+
+            message = (
                 alert(
                     pair,
                     s,
@@ -251,30 +293,48 @@ async def scan(session):
                     vol,
                     why
                 )
-                + f'\n\n🛡️ SECURITY\n{security_summary(security)}'
-                + f'\n\n{lp_status_text(lp_status)}'
+                + f'\n\n🛡️ SECURITY\n'
+                + security_summary(security)
+                + f'\n\n'
+                + lp_status_text(lp_status)
+                + f'\n\n'
+                + sell_route_text(sell_status)
+            )
+
+            await tg(
+                session,
+                message
             )
 
             logging.info(
-                'ALERT %s %s score=%s LP=%s',
+                'ALERT %s %s score=%s LP=%s SELL=%s',
                 token.get('symbol'),
                 token.get('address'),
                 s,
-                lp_status
+                lp_status,
+                sell_status
             )
 
 
 async def main():
     async with aiohttp.ClientSession() as session:
+
         while True:
+
             try:
                 await scan(session)
 
             except Exception:
-                logging.exception('scan failed')
+                logging.exception(
+                    'scan failed'
+                )
 
-            await asyncio.sleep(POLL_SECONDS)
+            await asyncio.sleep(
+                POLL_SECONDS
+            )
 
 
 if __name__ == '__main__':
-    asyncio.run(main())                    
+    asyncio.run(main)
+
+                    
