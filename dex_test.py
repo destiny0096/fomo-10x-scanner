@@ -3,16 +3,16 @@ import aiohttp
 
 BASE = "https://api.dexscreener.com"
 
+TOKEN_ADDRESS = "7rZAhiQtmJy6XYXxvkwYNCy3qqzFUYEozpQzjcHUpump"
+
 
 async def main():
-    token_address = input("Paste a Solana token CA: ").strip()
-
-    url = f"{BASE}/tokens/v1/solana/{token_address}"
+    url = f"{BASE}/tokens/v1/solana/{TOKEN_ADDRESS}"
 
     async with aiohttp.ClientSession() as session:
         async with session.get(url, timeout=20) as response:
 
-            print(f"\nHTTP status: {response.status}")
+            print(f"HTTP status: {response.status}")
 
             data = await response.json()
 
