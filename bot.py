@@ -2,6 +2,7 @@ import os
 import asyncio
 import logging
 from datetime import datetime, timezone
+
 import aiohttp
 from aiohttp import web
 
@@ -18,6 +19,15 @@ MAX_MC = float(os.getenv('MAX_MC', '500000'))
 MIN_LIQ = float(os.getenv('MIN_LIQUIDITY', '20000'))
 MIN_VOL = float(os.getenv('MIN_VOLUME', '50000'))
 MIN_SCORE = int(os.getenv('MIN_SCORE', '80'))
+
+MIN_BUY_PRESSURE = float(
+    os.getenv('MIN_BUY_PRESSURE', '70')
+)
+
+MIN_MOMENTUM = float(
+    os.getenv('MIN_MOMENTUM', '25')
+)
+
 POLL_SECONDS = int(os.getenv('POLL_SECONDS', '120'))
 
 BASE = 'https://api.dexscreener.com'
@@ -81,7 +91,10 @@ async def get(session, path, params=None):
 
 
 async def tg(session, text):
-    url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage'
+    url = (
+        f'https://api.telegram.org/'
+        f'bot{TELEGRAM_BOT_TOKEN}/sendMessage'
+    )
 
     async with session.post(
         url,
@@ -117,10 +130,16 @@ def score(pair):
     )
 
     liquidity_data = pair.get('liquidity') or {}
-    liq = float(liquidity_data.get('usd') or 0)
+
+    liq = float(
+        liquidity_data.get('usd') or 0
+    )
 
     volume_data = pair.get('volume') or {}
-    vol = float(volume_data.get('h24') or 0)
+
+    vol = float(
+        volume_data.get('h24') or 0
+    )
 
     s = 0
     why = []
@@ -154,7 +173,41 @@ def score(pair):
     return s, mc, liq, vol, why
 
 
-def alert(pair, s, mc, liq, vol, why):
+def get_momentum_and_buy_pressure(pair):
+    price_change = pair.get('priceChange') or {}
+    momentum = price_change.get('m5')
+
+    txns = pair.get('txns') or {}
+    m5 = txns.get('m5') or {}
+
+    buys = int(m5.get('buys') or 0)
+    sells = int(m5.get('sells') or 0)
+
+    total_transactions = buys + sells
+
+    if momentum is None:
+        return None, None
+
+    if total_transactions <= 0:
+        return float(momentum), None
+
+    buy_pressure = (
+        buys / total_transactions
+    ) * 100
+
+    return float(momentum), buy_pressure
+
+
+def alert(
+    pair,
+    s,
+    mc,
+    liq,
+    vol,
+    why,
+    momentum,
+    buy_pressure
+):
     base_token = pair.get('baseToken') or {}
 
     address = base_token.get('address') or ''
@@ -191,6 +244,8 @@ def alert(pair, s, mc, liq, vol, why):
         f'💰 MC: {money(mc)}\n'
         f'💧 Liquidity: {money(liq)}\n'
         f'📊 24h Volume: {money(vol)}\n'
+        f'🟢 Buy Pressure: {buy_pressure:.1f}%\n'
+        f'📈 5m Momentum: {momentum:+.2f}%\n'
         f'⭐ Score: {s}/100\n'
         f'📌 Signals: {", ".join(why) or "initial screen"}\n\n'
         f'⚠️ Screening only — NOT a 10× guarantee.\n\n'
@@ -266,6 +321,7 @@ async def scan(session):
             continue
 
         liquidity_data = pair.get('liquidity') or {}
+
         liquidity = float(
             liquidity_data.get('usd') or 0
         )
@@ -290,64 +346,108 @@ async def scan(session):
 
         s, mc, liq, vol, why = score(pair)
 
-        if (
+        if not (
             MIN_MC <= mc <= MAX_MC
             and liq >= MIN_LIQ
             and vol >= MIN_VOL
             and s >= MIN_SCORE
         ):
+            continue
 
-            token = pair.get('baseToken') or {}
-            address = token.get('address')
+        momentum, buy_pressure = (
+            get_momentum_and_buy_pressure(pair)
+        )
 
-            # Security check
-            security = await check_security(
-                session,
-                address
-            )
-
-            # LP check
-            lp_status = await check_lp_status(
-                session,
-                address
-            )
-
-            # Sell route check
-            sell_status = await check_sell_route(
-                session,
-                address
-            )
-
-            message = (
-                alert(
-                    pair,
-                    s,
-                    mc,
-                    liq,
-                    vol,
-                    why
-                )
-                + f'\n\n🛡️ SECURITY\n'
-                + security_summary(security)
-                + f'\n\n'
-                + lp_status_text(lp_status)
-                + f'\n\n'
-                + sell_route_text(sell_status)
-            )
-
-            await tg(
-                session,
-                message
-            )
-
+        if momentum is None:
             logging.info(
-                'ALERT %s %s score=%s LP=%s SELL=%s',
-                token.get('symbol'),
-                token.get('address'),
-                s,
-                lp_status,
-                sell_status
+                'REJECT %s: no m5 momentum data',
+                (pair.get('baseToken') or {}).get('symbol')
             )
+            continue
+
+        if buy_pressure is None:
+            logging.info(
+                'REJECT %s: no m5 transaction data',
+                (pair.get('baseToken') or {}).get('symbol')
+            )
+            continue
+
+        if momentum < MIN_MOMENTUM:
+            logging.info(
+                'REJECT %s: momentum %.2f%% < %.2f%%',
+                (pair.get('baseToken') or {}).get('symbol'),
+                momentum,
+                MIN_MOMENTUM
+            )
+            continue
+
+        if buy_pressure < MIN_BUY_PRESSURE:
+            logging.info(
+                'REJECT %s: buy pressure %.1f%% < %.1f%%',
+                (pair.get('baseToken') or {}).get('symbol'),
+                buy_pressure,
+                MIN_BUY_PRESSURE
+            )
+            continue
+
+        token = pair.get('baseToken') or {}
+        address = token.get('address')
+
+        # Security check
+        security = await check_security(
+            session,
+            address
+        )
+
+        # LP check
+        lp_status = await check_lp_status(
+            session,
+            address
+        )
+
+        # Sell route check
+        sell_status = await check_sell_route(
+            session,
+            address
+        )
+
+        message = (
+            alert(
+                pair,
+                s,
+                mc,
+                liq,
+                vol,
+                why,
+                momentum,
+                buy_pressure
+            )
+            + f'\n\n🛡️ SECURITY\n'
+            + security_summary(security)
+            + f'\n\n'
+            + lp_status_text(lp_status)
+            + f'\n\n'
+            + sell_route_text(sell_status)
+        )
+
+        await tg(
+            session,
+            message
+        )
+
+        logging.info(
+            'ALERT %s %s score=%s '
+            'BUY_PRESSURE=%.1f%% '
+            'MOMENTUM=%+.2f%% '
+            'LP=%s SELL=%s',
+            token.get('symbol'),
+            token.get('address'),
+            s,
+            buy_pressure,
+            momentum,
+            lp_status,
+            sell_status
+        )
 
 
 async def main():
