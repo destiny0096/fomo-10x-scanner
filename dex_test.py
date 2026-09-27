@@ -3,7 +3,7 @@ import aiohttp
 
 BASE = "https://api.dexscreener.com"
 
-TOKEN_ADDRESS = "7rZAhiQtmJy6XYXxvkwYNCy3qqzFUYEozpQzjcHUpump"
+TOKEN_ADDRESS = "6uPEdkU2xPg1iyfLzV1ssUwvve8nndA2sd6nBFrb1n58"
 
 
 async def main():
