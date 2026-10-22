@@ -18,14 +18,15 @@ MIN_MC = float(os.getenv('MIN_MC', '30000'))
 MAX_MC = float(os.getenv('MAX_MC', '500000'))
 MIN_LIQ = float(os.getenv('MIN_LIQUIDITY', '6000'))
 MIN_VOL = float(os.getenv('MIN_VOLUME', '5000'))
+MIN_VOL_5M = float(os.getenv('MIN_VOL_5M', '3000'))
 MIN_SCORE = int(os.getenv('MIN_SCORE', '80'))
 
 MIN_BUY_PRESSURE = float(
-    os.getenv('MIN_BUY_PRESSURE', '70')
+os.getenv('MIN_BUY_PRESSURE', '60')
 )
 
 MIN_MOMENTUM = float(
-    os.getenv('MIN_MOMENTUM', '25')
+os.getenv('MIN_MOMENTUM', '10')
 )
 
 POLL_SECONDS = int(os.getenv('POLL_SECONDS', '120'))
