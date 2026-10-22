@@ -347,6 +347,18 @@ async def scan(session):
 
         s, mc, liq, vol, why = score(pair)
 
+       volume_data = pair.get('volume') or {}
+       vol_5m = float(volume_data.get('m5') or 0)
+
+     if vol_5m < MIN_VOL_5M:
+     logging.info(
+    'REJECT %s: 5m volume $%.0f < $%.0f',
+     (pair.get('baseToken') or {}).get('symbol'),
+     vol_5m,
+     MIN_VOL_5M
+     )
+continue
+
         if not (
             MIN_MC <= mc <= MAX_MC
             and liq >= MIN_LIQ
