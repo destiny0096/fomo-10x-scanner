@@ -14,10 +14,10 @@ from sell_route_test import check_sell_route, sell_route_text
 TELEGRAM_BOT_TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
 TELEGRAM_CHAT_ID = os.environ['TELEGRAM_CHAT_ID']
 
-MIN_MC = float(os.getenv('MIN_MC', '50000'))
+MIN_MC = float(os.getenv('MIN_MC', '30000'))
 MAX_MC = float(os.getenv('MAX_MC', '500000'))
-MIN_LIQ = float(os.getenv('MIN_LIQUIDITY', '20000'))
-MIN_VOL = float(os.getenv('MIN_VOLUME', '50000'))
+MIN_LIQ = float(os.getenv('MIN_LIQUIDITY', '6000'))
+MIN_VOL = float(os.getenv('MIN_VOLUME', '5000'))
 MIN_SCORE = int(os.getenv('MIN_SCORE', '80'))
 
 MIN_BUY_PRESSURE = float(
