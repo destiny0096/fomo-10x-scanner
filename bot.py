@@ -345,7 +345,7 @@ async def scan(session):
 
     for pair in best_pairs.values():
 
-                s, mc, liq, vol, why = score(pair)
+        s, mc, liq, vol, why = score(pair)
 
         volume_data = pair.get('volume') or {}
         vol_5m = float(volume_data.get('m5') or 0)
@@ -358,7 +358,6 @@ async def scan(session):
                 MIN_VOL_5M
             )
             continue
-
         if not (
             MIN_MC <= mc <= MAX_MC
             and liq >= MIN_LIQ
