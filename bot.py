@@ -1,6 +1,7 @@
 import os
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 
 import aiohttp
@@ -11,178 +12,252 @@ from lp_test import check_lp_status, lp_status_text
 from sell_route_test import check_sell_route, sell_route_text
 
 
-TELEGRAM_BOT_TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
-TELEGRAM_CHAT_ID = os.environ['TELEGRAM_CHAT_ID']
+# ============================================================
+# CONFIGURATION
+# ============================================================
 
-MIN_MC = float(os.getenv('MIN_MC', '30000'))
-MAX_MC = float(os.getenv('MAX_MC', '500000'))
-MIN_LIQ = float(os.getenv('MIN_LIQUIDITY', '6000'))
-MIN_VOL = float(os.getenv('MIN_VOLUME', '5000'))
-MIN_VOL_5M = float(os.getenv('MIN_VOL_5M', '3000'))
-MIN_SCORE = int(os.getenv('MIN_SCORE', '80'))
+TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
+TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
+
+MIN_MC = float(os.getenv("MIN_MC", "30000"))
+MAX_MC = float(os.getenv("MAX_MC", "500000"))
+MIN_LIQ = float(os.getenv("MIN_LIQUIDITY", "6000"))
+MIN_VOL = float(os.getenv("MIN_VOLUME", "5000"))
+MIN_VOL_5M = float(os.getenv("MIN_VOL_5M", "3000"))
+MIN_SCORE = int(os.getenv("MIN_SCORE", "80"))
 
 MIN_BUY_PRESSURE = float(
-os.getenv('MIN_BUY_PRESSURE', '60')
+    os.getenv("MIN_BUY_PRESSURE", "60")
 )
 
 MIN_MOMENTUM = float(
-os.getenv('MIN_MOMENTUM', '10')
+    os.getenv("MIN_MOMENTUM", "10")
 )
 
-POLL_SECONDS = int(os.getenv('POLL_SECONDS', '120'))
+POLL_SECONDS = max(
+    30,
+    int(os.getenv("POLL_SECONDS", "120"))
+)
 
-BASE = 'https://api.dexscreener.com'
+BASE = "https://api.dexscreener.com"
 HEAD = {}
 
-seen = set()
+# DexScreener token endpoint supports batches of up to 30 addresses.
+BATCH_SIZE = 30
+
+# Keep candidates for up to 30 minutes after their last appearance
+# in the latest token-profile feed.
+CANDIDATE_TTL_SECONDS = 30 * 60
+
+# Bound memory usage.
+MAX_CANDIDATES = 500
+
+# In-memory candidate tracking.
+# address -> last time seen in the profile feed
+candidates = {}
+
+# Tokens for which a Telegram alert was successfully sent.
+alerted = set()
+
+# Round-robin cursor for processing tracked candidates.
+candidate_cursor = 0
 
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s %(levelname)s %(message)s'
+    format="%(asctime)s %(levelname)s %(message)s",
 )
 
 
+# ============================================================
+# HEALTH SERVER
+# ============================================================
+
 async def health(request):
     return web.Response(
-        text='FOMO 10X Scanner is running',
-        status=200
+        text="FOMO 10X Scanner is running",
+        status=200,
     )
 
 
 async def start_health_server():
-    port = int(os.getenv('PORT', '3000'))
+    port = int(os.getenv("PORT", "3000"))
 
     app = web.Application()
-    app.router.add_get('/', health)
-    app.router.add_get('/health', health)
+    app.router.add_get("/", health)
+    app.router.add_get("/health", health)
 
     runner = web.AppRunner(app)
     await runner.setup()
 
     site = web.TCPSite(
         runner,
-        '0.0.0.0',
-        port
+        "0.0.0.0",
+        port,
     )
 
     await site.start()
 
     logging.info(
-        'Health server listening on port %s',
-        port
+        "Health server listening on port %s",
+        port,
     )
 
     return runner
 
+
+# ============================================================
+# HTTP HELPERS
+# ============================================================
 
 async def get(session, path, params=None):
     async with session.get(
         BASE + path,
         headers=HEAD,
         params=params,
-        timeout=20
-    ) as r:
-        data = await r.json()
+        timeout=20,
+    ) as response:
 
-        if r.status >= 400:
-            raise RuntimeError(f'{r.status}: {data}')
+        data = await response.json()
+
+        if response.status >= 400:
+            raise RuntimeError(
+                f"{response.status}: {data}"
+            )
 
         return data
 
 
-async def tg(session, text):
+async def tg(session, message):
     url = (
-        f'https://api.telegram.org/'
-        f'bot{TELEGRAM_BOT_TOKEN}/sendMessage'
+        "https://api.telegram.org/"
+        f"bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     )
 
     async with session.post(
         url,
         json={
-            'chat_id': TELEGRAM_CHAT_ID,
-            'text': text,
-            'disable_web_page_preview': False
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": message,
+            "disable_web_page_preview": False,
         },
-        timeout=20
-    ) as r:
+        timeout=20,
+    ) as response:
 
-        if r.status >= 400:
-            raise RuntimeError(await r.text())
+        if response.status >= 400:
+            raise RuntimeError(await response.text())
+
+        result = await response.json()
+
+        if not result.get("ok"):
+            raise RuntimeError(
+                f"Telegram rejected message: {result}"
+            )
 
 
-def money(x):
-    x = float(x or 0)
+# ============================================================
+# FORMATTING
+# ============================================================
 
-    if x >= 1_000_000:
-        return f'${x / 1e6:.2f}M'
+def money(value):
+    value = float(value or 0)
 
-    if x >= 1_000:
-        return f'${x / 1e3:.1f}K'
+    if value >= 1_000_000:
+        return f"${value / 1e6:.2f}M"
 
-    return f'${x:.0f}'
+    if value >= 1_000:
+        return f"${value / 1e3:.1f}K"
 
+    return f"${value:.0f}"
+
+
+def token_age(pair):
+    created = pair.get("pairCreatedAt")
+
+    if not created:
+        return "unknown"
+
+    try:
+        created_seconds = float(created) / 1000
+
+        age_minutes = max(
+            0,
+            (
+                datetime.now(timezone.utc).timestamp()
+                - created_seconds
+            ) / 60,
+        )
+
+        return f"{age_minutes:.0f} min"
+
+    except (TypeError, ValueError, OverflowError):
+        return "unknown"
+
+
+# ============================================================
+# MARKET SCORING
+# ============================================================
 
 def score(pair):
     mc = float(
-        pair.get('marketCap')
-        or pair.get('fdv')
+        pair.get("marketCap")
+        or pair.get("fdv")
         or 0
     )
 
-    liquidity_data = pair.get('liquidity') or {}
+    liquidity_data = pair.get("liquidity") or {}
 
     liq = float(
-        liquidity_data.get('usd') or 0
+        liquidity_data.get("usd") or 0
     )
 
-    volume_data = pair.get('volume') or {}
+    volume_data = pair.get("volume") or {}
 
     vol = float(
-        volume_data.get('h24') or 0
+        volume_data.get("h24") or 0
     )
 
-    s = 0
-    why = []
+    total_score = 0
+    reasons = []
 
     if MIN_MC <= mc <= MAX_MC:
-        s += 25
-        why.append('target MC')
+        total_score += 25
+        reasons.append("target MC")
 
     if liq >= MIN_LIQ:
-        s += 25
-        why.append('liquidity')
+        total_score += 25
+        reasons.append("liquidity")
 
     if vol >= MIN_VOL:
-        s += 25
-        why.append('volume')
+        total_score += 25
+        reasons.append("volume")
 
-    txns = pair.get('txns') or {}
-    h24 = txns.get('h24') or {}
+    txns = pair.get("txns") or {}
+    h24 = txns.get("h24") or {}
 
-    buys = int(h24.get('buys') or 0)
-    sells = int(h24.get('sells') or 0)
+    buys = int(h24.get("buys") or 0)
+    sells = int(h24.get("sells") or 0)
 
     if buys >= 20:
-        s += 10
-        why.append('active trading')
+        total_score += 10
+        reasons.append("active trading")
 
     if buys > sells:
-        s += 5
-        why.append('buy pressure')
+        total_score += 5
+        reasons.append("buy pressure")
 
-    return s, mc, liq, vol, why
+    return total_score, mc, liq, vol, reasons
 
 
 def get_momentum_and_buy_pressure(pair):
-    price_change = pair.get('priceChange') or {}
-    momentum = price_change.get('m5')
+    price_change = pair.get("priceChange") or {}
+    momentum = price_change.get("m5")
 
-    txns = pair.get('txns') or {}
-    m5 = txns.get('m5') or {}
+    txns = pair.get("txns") or {}
+    transactions = txns.get("m5") or {}
 
-    buys = int(m5.get('buys') or 0)
-    sells = int(m5.get('sells') or 0)
+    buys = int(transactions.get("buys") or 0)
+    sells = int(transactions.get("sells") or 0)
 
     total_transactions = buys + sells
 
@@ -199,132 +274,167 @@ def get_momentum_and_buy_pressure(pair):
     return float(momentum), buy_pressure
 
 
+# ============================================================
+# ALERT MESSAGE
+# ============================================================
+
 def alert(
     pair,
-    s,
+    total_score,
     mc,
     liq,
     vol,
-    why,
+    reasons,
     momentum,
-    buy_pressure
+    buy_pressure,
 ):
-    base_token = pair.get('baseToken') or {}
+    token = pair.get("baseToken") or {}
 
-    address = base_token.get('address') or ''
-    name = base_token.get('name') or 'Unknown'
-    symbol = base_token.get('symbol') or '?'
-
-    created = pair.get('pairCreatedAt')
-
-    age = 'unknown'
-
-    if created:
-        created_seconds = float(created) / 1000
-
-        age_minutes = max(
-            0,
-            (
-                datetime.now(timezone.utc).timestamp()
-                - created_seconds
-            ) / 60
-        )
-
-        age = f'{age_minutes:.0f} min'
+    address = token.get("address") or ""
+    name = token.get("name") or "Unknown"
+    symbol = token.get("symbol") or "?"
 
     dex_url = pair.get(
-        'url',
-        f'https://dexscreener.com/solana/{address}'
+        "url",
+        f"https://dexscreener.com/solana/{address}",
     )
 
     return (
-        f'🚨 FOMO 10X WATCH ALERT\n\n'
-        f'🪙 {name} (${symbol})\n'
-        f'⛓️ Solana\n'
-        f'⏱️ Pair age: {age}\n'
-        f'💰 MC: {money(mc)}\n'
-        f'💧 Liquidity: {money(liq)}\n'
-        f'📊 24h Volume: {money(vol)}\n'
-        f'🟢 Buy Pressure: {buy_pressure:.1f}%\n'
-        f'📈 5m Momentum: {momentum:+.2f}%\n'
-        f'⭐ Score: {s}/100\n'
-        f'📌 Signals: {", ".join(why) or "initial screen"}\n\n'
-        f'⚠️ Screening only — NOT a 10× guarantee.\n\n'
-        f'CA: {address}\n'
-        f'🔗 {dex_url}'
+        "🚨 FOMO 10X WATCH ALERT\n\n"
+        f"🪙 {name} (${symbol})\n"
+        "⛓️ Solana\n"
+        f"⏱️ Pair age: {token_age(pair)}\n"
+        f"💰 MC: {money(mc)}\n"
+        f"💧 Liquidity: {money(liq)}\n"
+        f"📊 24h Volume: {money(vol)}\n"
+        f"🟢 Buy Pressure: {buy_pressure:.1f}%\n"
+        f"📈 5m Momentum: {momentum:+.2f}%\n"
+        f"⭐ Score: {total_score}/100\n"
+        f"📌 Signals: {', '.join(reasons)}\n\n"
+        "⚠️ Screening only — NOT a 10× guarantee.\n\n"
+        f"CA: {address}\n"
+        f"🔗 {dex_url}"
     )
 
 
-async def scan(session):
-    profiles = await get(
-        session,
-        '/token-profiles/latest/v1'
-    )
+# ============================================================
+# CANDIDATE TRACKING
+# ============================================================
 
-    if not isinstance(profiles, list):
-        logging.warning(
-            'Unexpected token profile response'
-        )
-        return
+def update_candidates(profiles):
+    """
+    Remember newly discovered Solana tokens and refresh the
+    last-seen time of tokens that appear in the profile feed.
+    """
 
-    solana_tokens = []
+    now = time.time()
 
     for token in profiles:
 
-        if token.get('chainId') != 'solana':
+        if token.get("chainId") != "solana":
             continue
 
-        address = token.get('tokenAddress')
+        address = token.get("tokenAddress")
 
         if not address:
             continue
 
-        if address in seen:
+        if address in alerted:
             continue
 
-        solana_tokens.append(address)
+        candidates[address] = now
 
-    if not solana_tokens:
-        logging.info(
-            'No new Solana candidates found'
+    # Remove candidates that have not appeared recently.
+    expired = [
+        address
+        for address, last_seen in candidates.items()
+        if now - last_seen > CANDIDATE_TTL_SECONDS
+    ]
+
+    for address in expired:
+        candidates.pop(address, None)
+
+    # Keep memory bounded if the profile feed is unusually busy.
+    if len(candidates) > MAX_CANDIDATES:
+
+        oldest_first = sorted(
+            candidates.items(),
+            key=lambda item: item[1],
         )
-        return
 
-    solana_tokens = solana_tokens[:30]
+        excess = len(candidates) - MAX_CANDIDATES
 
-    for address in solana_tokens:
-        seen.add(address)
+        for address, _ in oldest_first[:excess]:
+            candidates.pop(address, None)
 
-    address_list = ','.join(solana_tokens)
-
-    pairs = await get(
-        session,
-        f'/tokens/v1/solana/{address_list}'
+    logging.info(
+        "Tracking %s candidates; %s already alerted",
+        len(candidates),
+        len(alerted),
     )
+
+
+def next_candidate_batch():
+    """
+    Select a rotating batch so candidates outside the first
+    30 are not permanently starved by newer candidates.
+    """
+
+    global candidate_cursor
+
+    addresses = list(candidates.keys())
+
+    if not addresses:
+        return []
+
+    count = len(addresses)
+
+    start = candidate_cursor % count
+
+    batch = [
+        addresses[(start + offset) % count]
+        for offset in range(min(BATCH_SIZE, count))
+    ]
+
+    candidate_cursor = (
+        start + len(batch)
+    ) % count
+
+    return batch
+
+
+# ============================================================
+# PAIR SELECTION
+# ============================================================
+
+def best_solana_pairs(pairs):
+    """
+    Select the most liquid Solana pair returned for each token.
+    """
 
     if not isinstance(pairs, list):
         logging.warning(
-            'Unexpected token pair response'
+            "Unexpected token pair response"
         )
-        return
+        return {}
 
     best_pairs = {}
 
     for pair in pairs:
 
-        if pair.get('chainId') != 'solana':
+        if pair.get("chainId") != "solana":
             continue
 
-        token = pair.get('baseToken') or {}
-        address = token.get('address')
+        token = pair.get("baseToken") or {}
+        address = token.get("address")
 
         if not address:
             continue
 
-        liquidity_data = pair.get('liquidity') or {}
+        liquidity_data = pair.get("liquidity") or {}
 
         liquidity = float(
-            liquidity_data.get('usd') or 0
+            liquidity_data.get("usd") or 0
         )
 
         current = best_pairs.get(address)
@@ -336,134 +446,231 @@ async def scan(session):
         else:
 
             current_liquidity = float(
-                (current.get('liquidity') or {}).get('usd')
+                (current.get("liquidity") or {}).get("usd")
                 or 0
             )
 
             if liquidity > current_liquidity:
                 best_pairs[address] = pair
 
-    for pair in best_pairs.values():
+    return best_pairs
 
-        s, mc, liq, vol, why = score(pair)
 
-        volume_data = pair.get('volume') or {}
-        vol_5m = float(volume_data.get('m5') or 0)
+# ============================================================
+# TOKEN EVALUATION
+# ============================================================
 
-        if vol_5m < MIN_VOL_5M:
-            logging.info(
-                'REJECT %s: 5m volume $%.0f < $%.0f',
-                (pair.get('baseToken') or {}).get('symbol'),
-                vol_5m,
-                MIN_VOL_5M
-            )
-            continue
-        if not (
-            MIN_MC <= mc <= MAX_MC
-            and liq >= MIN_LIQ
-            and vol >= MIN_VOL
-            and s >= MIN_SCORE
-        ):
-            continue
+async def evaluate_pair(session, pair):
+    """
+    Evaluate the latest available pair data.
 
-        momentum, buy_pressure = (
-            get_momentum_and_buy_pressure(pair)
-        )
+    Return True only after the Telegram alert is sent
+    successfully. Rejected tokens remain eligible for rechecks.
+    """
 
-        if momentum is None:
-            logging.info(
-                'REJECT %s: no m5 momentum data',
-                (pair.get('baseToken') or {}).get('symbol')
-            )
-            continue
+    token = pair.get("baseToken") or {}
+    address = token.get("address")
 
-        if buy_pressure is None:
-            logging.info(
-                'REJECT %s: no m5 transaction data',
-                (pair.get('baseToken') or {}).get('symbol')
-            )
-            continue
+    if not address:
+        return False
 
-        if momentum < MIN_MOMENTUM:
-            logging.info(
-                'REJECT %s: momentum %.2f%% < %.2f%%',
-                (pair.get('baseToken') or {}).get('symbol'),
-                momentum,
-                MIN_MOMENTUM
-            )
-            continue
+    if address in alerted:
+        return False
 
-        if buy_pressure < MIN_BUY_PRESSURE:
-            logging.info(
-                'REJECT %s: buy pressure %.1f%% < %.1f%%',
-                (pair.get('baseToken') or {}).get('symbol'),
-                buy_pressure,
-                MIN_BUY_PRESSURE
-            )
-            continue
+    total_score, mc, liq, vol, reasons = score(pair)
 
-        token = pair.get('baseToken') or {}
-        address = token.get('address')
+    # Stage 1: market-cap, liquidity, volume and score.
+    if not (MIN_MC <= mc <= MAX_MC):
+        return False
 
-        # Security check
-        security = await check_security(
-            session,
-            address
-        )
+    if liq < MIN_LIQ:
+        return False
 
-        # LP check
-        lp_status = await check_lp_status(
-            session,
-            address
-        )
+    if vol < MIN_VOL:
+        return False
 
-        # Sell route check
-        sell_status = await check_sell_route(
-            session,
-            address
-        )
+    if total_score < MIN_SCORE:
+        return False
 
-        message = (
-            alert(
-                pair,
-                s,
-                mc,
-                liq,
-                vol,
-                why,
-                momentum,
-                buy_pressure
-            )
-            + f'\n\n🛡️ SECURITY\n'
-            + security_summary(security)
-            + f'\n\n'
-            + lp_status_text(lp_status)
-            + f'\n\n'
-            + sell_route_text(sell_status)
-        )
+    # Stage 2: five-minute volume.
+    volume_data = pair.get("volume") or {}
+    vol_5m = float(volume_data.get("m5") or 0)
 
-        await tg(
-            session,
-            message
-        )
-
+    if vol_5m < MIN_VOL_5M:
         logging.info(
-            'ALERT %s %s score=%s '
-            'BUY_PRESSURE=%.1f%% '
-            'MOMENTUM=%+.2f%% '
-            'LP=%s SELL=%s',
-            token.get('symbol'),
-            token.get('address'),
-            s,
-            buy_pressure,
-            momentum,
-            lp_status,
-            sell_status
+            "REJECT %s: 5m volume $%.0f < $%.0f",
+            token.get("symbol"),
+            vol_5m,
+            MIN_VOL_5M,
         )
+        return False
 
+    # Stage 3: momentum and buy pressure.
+    momentum, buy_pressure = (
+        get_momentum_and_buy_pressure(pair)
+    )
+
+    if momentum is None:
+        logging.info(
+            "REJECT %s: no m5 momentum data",
+            token.get("symbol"),
+        )
+        return False
+
+    if buy_pressure is None:
+        logging.info(
+            "REJECT %s: no m5 transaction data",
+            token.get("symbol"),
+        )
+        return False
+
+    if momentum < MIN_MOMENTUM:
+        logging.info(
+            "REJECT %s: momentum %.2f%% < %.2f%%",
+            token.get("symbol"),
+            momentum,
+            MIN_MOMENTUM,
+        )
+        return False
+
+    if buy_pressure < MIN_BUY_PRESSURE:
+        logging.info(
+            "REJECT %s: buy pressure %.1f%% < %.1f%%",
+            token.get("symbol"),
+            buy_pressure,
+            MIN_BUY_PRESSURE,
+        )
+        return False
+
+    # Stage 4: security, LP and sell-route checks.
+    # Exceptions are handled by the scan loop; the candidate
+    # stays eligible for another evaluation.
+    security = await check_security(
+        session,
+        address,
+    )
+
+    lp_status = await check_lp_status(
+        session,
+        address,
+    )
+
+    sell_status = await check_sell_route(
+        session,
+        address,
+    )
+
+    message = (
+        alert(
+            pair,
+            total_score,
+            mc,
+            liq,
+            vol,
+            reasons,
+            momentum,
+            buy_pressure,
+        )
+        + "\n\n🛡️ SECURITY\n"
+        + security_summary(security)
+        + "\n\n"
+        + lp_status_text(lp_status)
+        + "\n\n"
+        + sell_route_text(sell_status)
+    )
+
+    # Only mark the token alerted after Telegram confirms success.
+    await tg(session, message)
+
+    alerted.add(address)
+    candidates.pop(address, None)
+
+    logging.info(
+        "ALERT %s %s score=%s "
+        "BUY_PRESSURE=%.1f%% "
+        "MOMENTUM=%+.2f%% "
+        "LP=%s SELL=%s",
+        token.get("symbol"),
+        address,
+        total_score,
+        buy_pressure,
+        momentum,
+        lp_status,
+        sell_status,
+    )
+
+    return True
+
+
+# ============================================================
+# MAIN SCAN
+# ============================================================
+
+async def scan(session):
+    profiles = await get(
+        session,
+        "/token-profiles/latest/v1",
+    )
+
+    if not isinstance(profiles, list):
+        logging.warning(
+            "Unexpected token profile response"
+        )
+        return
+
+    update_candidates(profiles)
+
+    batch = next_candidate_batch()
+
+    if not batch:
+        logging.info(
+            "No Solana candidates to evaluate"
+        )
+        return
+
+    # Process the selected batch. If the API request fails,
+    # candidates remain stored for a later scan.
+    address_list = ",".join(batch)
+
+    pairs = await get(
+        session,
+        f"/tokens/v1/solana/{address_list}",
+    )
+
+    best_pairs = best_solana_pairs(pairs)
+
+    # Evaluate only addresses in this batch.
+    for address in batch:
+
+        pair = best_pairs.get(address)
+
+        if pair is None:
+            continue
+
+        try:
+            await evaluate_pair(
+                session,
+                pair,
+            )
+
+        except Exception:
+            logging.exception(
+                "Evaluation failed for token %s; "
+                "it will remain eligible for rechecking",
+                address,
+            )
+
+
+# ============================================================
+# APPLICATION LOOP
+# ============================================================
 
 async def main():
-    async with aiohttp.ClientSession() as session:
+    timeout = aiohttp.ClientTimeout(total=30)
+
+    async with aiohttp.ClientSession(
+        timeout=timeout,
+    ) as session:
 
         while True:
 
@@ -472,7 +679,7 @@ async def main():
 
             except Exception:
                 logging.exception(
-                    'scan failed'
+                    "Scan failed; will retry next cycle"
                 )
 
             await asyncio.sleep(
@@ -490,6 +697,5 @@ async def run():
         await runner.cleanup()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(run())
-                    
