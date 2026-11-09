@@ -97,6 +97,18 @@ class PersistenceTests(unittest.TestCase):
                 with self.assertRaises(FileNotFoundError):
                     create_backup()
 
+    def test_hard_cap_is_exactly_100_qualified_tokens(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = TrackerDatabase(Path(d) / "tracker.db")
+            for index in range(100):
+                token = self._token()
+                token["address"] = f"Mint{index}"
+                self.assertEqual(db.add_qualified(token, f"2026-11-09T10:{index:02d}:00Z"), "added")
+            extra = self._token()
+            extra["address"] = "Mint101"
+            self.assertEqual(db.add_qualified(extra, "2026-11-09T12:00:00Z"), "full")
+            self.assertEqual(db.count(), 100)
+
     def test_backup_cannot_overwrite_live_database(self):
         with tempfile.TemporaryDirectory() as d:
             db = TrackerDatabase(Path(d) / "tracker.db")
