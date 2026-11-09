@@ -34,7 +34,7 @@ async def evaluate_and_record(
     address = str(token.get("address") or "").strip()
     try:
         market_cap = float(token.get("market_cap") or 0)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         market_cap = 0.0
 
     if not address:
