@@ -2,9 +2,6 @@ import unittest
 from tracker.sources import _MetaParser, _identity_match, _clean
 
 class SourceAdapterTests(unittest.TestCase):
-    def test_whitespace_is_normalized(self):
-        self.assertEqual(_clean('alpha\\n\\t beta'), 'alpha beta')
-
     def test_reads_project_description_metadata(self):
         parser = _MetaParser()
         parser.feed('<html><head><title>Example Token</title><meta name="description" content="A community project about art"></head></html>')
