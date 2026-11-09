@@ -1,5 +1,8 @@
+import asyncio
+import os
 import unittest
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 from tracker.market_monitor import _market_cap, market_cap_monitor
 
@@ -17,11 +20,57 @@ class MarketCapParsingTests(unittest.TestCase):
                 self.assertIsNone(_market_cap(pair))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class MonitorIsolationTests(unittest.IsolatedAsyncioTestCase):
     async def test_database_initialization_failure_is_contained(self):
         with patch("tracker.market_monitor.TrackerDatabase", side_effect=OSError("disk unavailable")):
             await market_cap_monitor(interval_seconds=60)
+
+    async def test_scheduled_backup_runs_on_startup(self):
+        class FakeDatabase:
+            def count(self):
+                return 0
+            def list_tokens(self):
+                return []
+
+        class FakeSession:
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                return None
+
+        with patch.dict(os.environ, {"TRACKER_BACKUP_INTERVAL_SECONDS": "60"}), \
+             patch("tracker.market_monitor.aiohttp.ClientSession", return_value=FakeSession()), \
+             patch("tracker.backup.create_backup") as create_backup, \
+             patch("tracker.market_monitor.asyncio.to_thread", new=AsyncMock(return_value=Path("/tmp/backup.db"))) as to_thread, \
+             patch("tracker.market_monitor.asyncio.sleep", new=AsyncMock(side_effect=asyncio.CancelledError)):
+            with self.assertRaises(asyncio.CancelledError):
+                await market_cap_monitor(database=FakeDatabase(), interval_seconds=60)
+
+        create_backup.assert_called_once_with()
+        to_thread.assert_awaited_once_with(create_backup)
+
+    async def test_scheduled_backups_can_be_disabled(self):
+        class FakeDatabase:
+            def count(self):
+                return 0
+            def list_tokens(self):
+                return []
+
+        class FakeSession:
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                return None
+
+        with patch.dict(os.environ, {"TRACKER_BACKUP_INTERVAL_SECONDS": "0"}), \
+             patch("tracker.market_monitor.aiohttp.ClientSession", return_value=FakeSession()), \
+             patch("tracker.backup.create_backup") as create_backup, \
+             patch("tracker.market_monitor.asyncio.sleep", new=AsyncMock(side_effect=asyncio.CancelledError)):
+            with self.assertRaises(asyncio.CancelledError):
+                await market_cap_monitor(database=FakeDatabase(), interval_seconds=60)
+
+        create_backup.assert_not_called()
+
+
+if __name__ == "__main__":
+    unittest.main()
