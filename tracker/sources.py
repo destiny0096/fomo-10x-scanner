@@ -130,7 +130,15 @@ async def _get_text(session: aiohttp.ClientSession, url: str) -> str | None:
                 return None
             if "text/html" not in response.headers.get("Content-Type", "").lower():
                 return None
-            return (await response.text())[:500_000]
+            chunks = []
+            total_bytes = 0
+            async for chunk in response.content.iter_chunked(64 * 1024):
+                total_bytes += len(chunk)
+                if total_bytes > 500_000:
+                    return None
+                chunks.append(chunk)
+            encoding = response.charset or "utf-8"
+            return b"".join(chunks).decode(encoding, errors="replace")
     except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
         return None
 
