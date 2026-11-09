@@ -11,8 +11,8 @@ from tracker.report import build_report
 from tracker.export import export_results
 from tracker.tracker import qualify_token
 
-NARRATIVE = [{"source":"Project website","url":"https://example.org/about","summary":"Documented project theme and purpose","observed_at":"2026-11-09T10:00:00Z"}]
-ATTENTION = [{"source":"Public community post","url":"https://example.org/community","summary":"Public discussion with observable engagement","observed_at":"2026-11-09T10:01:00Z"}]
+NARRATIVE = [{"source":"Project website","url":"https://example.org/about","summary":"A community-led project building open tools for creators and digital culture.","observed_at":"2026-11-09T10:00:00Z"}]
+ATTENTION = [{"source":"Reddit public search","url":"https://www.reddit.com/r/example/comments/abc/post","summary":"Two independent authors discussed the project with measurable engagement.","distinct_authors":2,"post_count":2,"engagement":7,"observed_at":"2026-11-09T10:01:00Z"}]
 
 
 class QualificationTests(unittest.TestCase):
@@ -28,6 +28,25 @@ class QualificationTests(unittest.TestCase):
     def test_unlinked_evidence_fails(self):
         bad = [{"source":"unknown","url":"","summary":"Trust me","observed_at":"now"}]
         self.assertFalse(qualify_token({"address":"Mint111","narrative_evidence":bad,"attention_evidence":ATTENTION}).qualified)
+
+    def test_short_or_placeholder_narrative_is_rejected(self):
+        weak = [{"source": "Project website", "url": "https://example.org",
+                 "summary": "Coming soon", "observed_at": "now"}]
+        self.assertFalse(qualify_token({
+            "address": "MintWeak", "narrative_evidence": weak,
+            "attention_evidence": ATTENTION,
+        }).qualified)
+
+    def test_attention_requires_measured_public_engagement(self):
+        weak = [{"source": "Reddit public search", "url": "https://www.reddit.com/r/example/post",
+                 "summary": "A post was found", "observed_at": "now"}]
+        result = qualify_token({
+            "address": "MintWeakAttention", "narrative_evidence": NARRATIVE,
+            "attention_evidence": weak,
+        })
+        self.assertFalse(result.qualified)
+        self.assertTrue(result.narrative_pass)
+        self.assertFalse(result.attention_pass)
 
     def test_address_required(self):
         self.assertFalse(qualify_token({"narrative_evidence":NARRATIVE,"attention_evidence":ATTENTION}).qualified)
