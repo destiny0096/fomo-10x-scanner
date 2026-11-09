@@ -6,6 +6,7 @@ separate, explicitly reviewed change so this module cannot alter Telegram alerts
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import math
 from typing import Any, Awaitable, Callable
 
 from .database import TrackerDatabase
@@ -38,7 +39,7 @@ async def evaluate_and_record(
 
     if not address:
         return {"status": "rejected", "reason": "Missing token address.", "qualification": None}
-    if market_cap <= 0:
+    if not math.isfinite(market_cap) or market_cap <= 0:
         return {"status": "rejected", "reason": "Missing or invalid starting market cap.", "qualification": None}
 
     try:
