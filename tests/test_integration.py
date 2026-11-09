@@ -27,7 +27,7 @@ class IntegrationBridgeTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("tracker.integration.TrackerDatabase", return_value=FakeDatabase()), \
              patch("tracker.integration.evaluate_and_record", new=AsyncMock(return_value={"status": "qualified"})), \
-             patch("tracker.integration.send_progress_notification", new=AsyncMock(return_value=True)) as send_text, \
+             patch("tracker.integration.send_progress_notification", new=AsyncMock(side_effect=RuntimeError("Telegram offline"))) as send_text, \
              patch("tracker.integration.export_results", return_value=Path("/tmp/results.csv")) as export, \
              patch("tracker.integration.send_completion_export", new=AsyncMock(return_value=True)) as send_csv:
             result = await track_alerted_token({"address": "Mint99", "symbol": "T99"})
