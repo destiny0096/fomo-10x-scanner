@@ -586,11 +586,13 @@ async def evaluate_pair(session, pair):
 
     # Tracker runs in the background after the Telegram alert succeeds.
     # Any tracker/network/database failure is isolated from scanner operation.
+    # The scanner may use FDV as a fallback for its existing alert filter.
+    # The tracker must receive reported marketCap only, never FDV mislabeled as MC.
     schedule_tracking({
         "address": address,
         "name": token.get("name", ""),
         "symbol": token.get("symbol", ""),
-        "market_cap": mc,
+        "market_cap": pair.get("marketCap"),
     })
 
     alerted.add(address)
