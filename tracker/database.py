@@ -2,6 +2,7 @@
 import json
 import os
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -21,11 +22,19 @@ class TrackerDatabase:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
+    @contextmanager
     def _connect(self):
         db = sqlite3.connect(str(self.path), timeout=30)
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA busy_timeout = 30000")
-        return db
+        try:
+            yield db
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 
     def _initialize(self):
         with self._connect() as db:
