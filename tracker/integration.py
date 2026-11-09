@@ -71,3 +71,16 @@ def schedule_tracking(token: dict[str, Any]) -> bool:
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
     return True
+
+
+async def drain_tracking_tasks(timeout_seconds: float = 20.0) -> None:
+    """Give scheduled tracker work a bounded chance to finish during shutdown."""
+    tasks = {task for task in _background_tasks if not task.done()}
+    if not tasks:
+        return
+    done, pending = await asyncio.wait(tasks, timeout=max(0.0, timeout_seconds))
+    for task in pending:
+        logger.warning("Cancelling unfinished tracker task during shutdown")
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
