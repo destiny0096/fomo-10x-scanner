@@ -99,8 +99,7 @@ async def market_cap_monitor(database: TrackerDatabase | None = None, interval_s
         interval = 300
     try:
         backup_interval = int(os.getenv("TRACKER_BACKUP_INTERVAL_SECONDS", "21600"))
-        if backup_interval > 0:
-            backup_interval = max(60, backup_interval)
+        backup_interval = max(60, backup_interval) if backup_interval > 0 else 0
     except (TypeError, ValueError):
         log.warning("Invalid TRACKER_BACKUP_INTERVAL_SECONDS; using 21600 seconds")
         backup_interval = 21600
