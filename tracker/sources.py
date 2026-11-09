@@ -25,7 +25,7 @@ def utc_now() -> str:
 
 
 def _clean(value: str) -> str:
-    return re.sub(r"\\s+", " ", value or "").strip()
+    return re.sub(r"\s+", " ", value or "").strip()
 
 
 class _MetaParser(HTMLParser):
