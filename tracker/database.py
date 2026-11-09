@@ -3,6 +3,7 @@ import json
 import math
 import os
 import sqlite3
+import tempfile
 from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any
@@ -67,7 +68,11 @@ class TrackerDatabase:
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.resolve() == self.path.resolve():
             raise ValueError("Backup destination must differ from the live database")
-        temporary = target.with_name(target.name + ".tmp")
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=target.name + ".", suffix=".tmp", dir=str(target.parent)
+        )
+        os.close(descriptor)
+        temporary = Path(temporary_name)
         try:
             with self._connect() as source:
                 with closing(sqlite3.connect(str(temporary), timeout=30)) as backup:
