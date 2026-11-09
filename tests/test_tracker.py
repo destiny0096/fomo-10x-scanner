@@ -8,6 +8,7 @@ from tracker.database import TrackerDatabase, configured_database_path
 from tracker.backup import create_backup
 from tracker.performance import milestone_hits, multiple
 from tracker.report import build_report
+from tracker.export import export_results
 from tracker.tracker import qualify_token
 
 NARRATIVE = [{"source":"Project website","url":"https://example.org/about","summary":"Documented project theme and purpose","observed_at":"2026-11-09T10:00:00Z"}]
@@ -108,7 +109,44 @@ class ReportTests(unittest.TestCase):
         rows = [{"symbol":"A","address":"MintA","initial_mc":100,"peak_mc":1200}]
         self.assertEqual(multiple(100,1200),12)
         self.assertEqual(milestone_hits(rows)["10x"],1)
-        self.assertIn("12.00x",build_report(rows))
+        report = build_report(rows)
+        self.assertIn("12.00x", report)
+        self.assertIn("Peak-multiple distribution:", report)
+        self.assertIn("10x to <20x: 1", report)
+        self.assertNotIn("\\n", report)
+
+    def test_report_handles_missing_and_invalid_market_caps(self):
+        rows = [
+            {"symbol": "GOOD", "initial_mc": 100, "peak_mc": 200, "current_mc": 150},
+            {"symbol": "BAD", "initial_mc": 0, "peak_mc": 500, "current_mc": 0},
+            {"symbol": "MISSING", "address": "MintMissing"},
+        ]
+        report = build_report(rows)
+        self.assertIn("Qualified tokens: 3/100", report)
+        self.assertIn("Records without valid peak data: 2", report)
+        self.assertIn("Median peak multiple (valid records): 2.00x", report)
+
+    def test_csv_export_contains_all_cohort_rows_and_evidence(self):
+        import csv
+        import json
+
+        with tempfile.TemporaryDirectory() as d:
+            rows = [
+                {"symbol": "ONE", "name": "Token One", "address": "MintOne",
+                 "qualified_at": "2026-11-09T10:00:00Z", "initial_mc": 100,
+                 "current_mc": 150, "peak_mc": 1200,
+                 "evidence_json": json.dumps({"narrative": NARRATIVE, "attention": ATTENTION})},
+                {"symbol": "TWO", "name": "Token Two", "address": "MintTwo",
+                 "qualified_at": "2026-11-09T10:01:00Z", "initial_mc": 200,
+                 "current_mc": 100, "peak_mc": 400, "evidence_json": "{}"},
+            ]
+            path = export_results(rows, Path(d) / "exports" / "results.csv")
+            with path.open(encoding="utf-8-sig", newline="") as handle:
+                exported = list(csv.DictReader(handle))
+            self.assertEqual(len(exported), 2)
+            self.assertEqual(exported[0]["symbol"], "ONE")
+            self.assertEqual(exported[0]["peak_multiple"], "12.0")
+            self.assertIn("Project website", exported[0]["narrative_evidence"])
 
 
 if __name__ == "__main__":
