@@ -1,5 +1,6 @@
 """Evidence-based narrative checks; never infer missing evidence."""
 from dataclasses import dataclass
+import re
 from typing import Any
 from urllib.parse import urlparse
 
@@ -10,7 +11,6 @@ GENERIC_NARRATIVE_PHRASES = (
     "website coming soon",
     "lorem ipsum",
     "test token",
-    "official website",
     "no description",
     "to be announced",
     "tba",
@@ -42,7 +42,7 @@ class Evidence:
 def _is_substantive_narrative(evidence: Evidence) -> bool:
     summary = " ".join(evidence.summary.split())
     lowered = summary.casefold()
-    if any(phrase in lowered for phrase in GENERIC_NARRATIVE_PHRASES):
+    if any(re.search(rf"\\b{re.escape(phrase)}\\b", lowered) for phrase in GENERIC_NARRATIVE_PHRASES):
         return False
     words = summary.split()
     return len(summary) >= MIN_NARRATIVE_CHARACTERS and len(words) >= MIN_NARRATIVE_WORDS
