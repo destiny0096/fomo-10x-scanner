@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from tracker.database import TrackerDatabase, configured_database_path
 from tracker.backup import create_backup
+from tracker.restore import restore_backup
 from tracker.performance import milestone_hits, multiple
 from tracker.report import build_report
 from tracker.export import export_results
@@ -176,6 +177,72 @@ class PersistenceTests(unittest.TestCase):
             with patch.dict(os.environ, {"TRACKER_DB_PATH": str(Path(d) / "missing.db")}):
                 with self.assertRaises(FileNotFoundError):
                     create_backup()
+
+    def test_restore_creates_database_from_valid_backup(self):
+        with tempfile.TemporaryDirectory() as d:
+            live = Path(d) / "live.db"
+            backup = Path(d) / "backup.db"
+            original = TrackerDatabase(live)
+            original.add_qualified(self._token(), "2026-11-09T10:00:00Z")
+            original.record_market_cap("Mint111", 42000, "2026-11-09T11:00:00Z")
+            original.backup_to(backup)
+            live.unlink()
+
+            restored_path = restore_backup(backup, live)
+            restored = TrackerDatabase(restored_path)
+            self.assertEqual(restored.count(), 1)
+            self.assertEqual(restored.list_tokens()[0]["peak_mc"], 42000)
+            self.assertTrue(restored.integrity_check())
+
+    def test_restore_refuses_to_overwrite_without_force(self):
+        with tempfile.TemporaryDirectory() as d:
+            live = Path(d) / "live.db"
+            backup = Path(d) / "backup.db"
+            TrackerDatabase(live)
+            TrackerDatabase(backup)
+            with self.assertRaises(FileExistsError):
+                restore_backup(backup, live)
+            self.assertTrue(live.exists())
+
+    def test_forced_restore_preserves_pre_restore_safety_backup(self):
+        with tempfile.TemporaryDirectory() as d:
+            live = Path(d) / "live.db"
+            backup = Path(d) / "backup.db"
+            current = TrackerDatabase(live)
+            current.add_qualified(self._token(), "2026-11-09T10:00:00Z")
+            replacement = TrackerDatabase(backup)
+            token = self._token()
+            token["address"] = "BackupMint"
+            replacement.add_qualified(token, "2026-11-09T12:00:00Z")
+
+            restore_backup(backup, live, force=True)
+            restored = TrackerDatabase(live)
+            self.assertEqual([row["address"] for row in restored.list_tokens()], ["BackupMint"])
+            safety_copies = list(Path(d).glob("live.db.pre-restore-*.db"))
+            self.assertEqual(len(safety_copies), 1)
+            preserved = TrackerDatabase(safety_copies[0])
+            self.assertEqual([row["address"] for row in preserved.list_tokens()], ["Mint111"])
+
+    def test_restore_rejects_invalid_backup_without_changing_live_database(self):
+        with tempfile.TemporaryDirectory() as d:
+            live = Path(d) / "live.db"
+            backup = Path(d) / "bad-backup.db"
+            current = TrackerDatabase(live)
+            current.add_qualified(self._token(), "2026-11-09T10:00:00Z")
+            backup.write_text("not a sqlite database")
+            with self.assertRaises(Exception):
+                restore_backup(backup, live, force=True)
+            self.assertEqual(TrackerDatabase(live).count(), 1)
+
+    def test_restore_refuses_existing_sqlite_sidecars(self):
+        with tempfile.TemporaryDirectory() as d:
+            live = Path(d) / "live.db"
+            backup = Path(d) / "backup.db"
+            TrackerDatabase(live)
+            TrackerDatabase(backup)
+            Path(str(live) + "-wal").write_bytes(b"")
+            with self.assertRaisesRegex(RuntimeError, "sidecar files"):
+                restore_backup(backup, live, force=True)
 
     def test_hard_cap_is_exactly_100_qualified_tokens(self):
         with tempfile.TemporaryDirectory() as d:
