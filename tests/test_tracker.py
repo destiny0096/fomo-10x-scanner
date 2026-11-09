@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tracker.database import TrackerDatabase
+from tracker.backup import create_backup
 from tracker.performance import milestone_hits, multiple
 from tracker.report import build_report
 from tracker.tracker import qualify_token
@@ -69,6 +70,20 @@ class PersistenceTests(unittest.TestCase):
             self.assertTrue(restored.integrity_check())
             self.assertEqual(restored.count(), 1)
             self.assertEqual(restored.list_tokens()[0]["peak_mc"], 25000)
+
+    def test_backup_command_uses_configured_separate_directory(self):
+        with tempfile.TemporaryDirectory() as d:
+            live_path = Path(d) / "live" / "tracker.db"
+            backup_dir = Path(d) / "backup-volume"
+            with patch.dict(os.environ, {
+                "TRACKER_DB_PATH": str(live_path),
+                "TRACKER_BACKUP_DIR": str(backup_dir),
+            }):
+                TrackerDatabase().add_qualified(self._token(), "2026-11-09T10:00:00Z")
+                backup = create_backup()
+            self.assertEqual(backup.parent, backup_dir)
+            self.assertTrue(backup.exists())
+            self.assertTrue(TrackerDatabase(backup).integrity_check())
 
     def test_backup_cannot_overwrite_live_database(self):
         with tempfile.TemporaryDirectory() as d:
