@@ -29,6 +29,31 @@ class QualificationTests(unittest.TestCase):
         bad = [{"source":"unknown","url":"","summary":"Trust me","observed_at":"now"}]
         self.assertFalse(qualify_token({"address":"Mint111","narrative_evidence":bad,"attention_evidence":ATTENTION}).qualified)
 
+    def test_narrative_word_and_character_thresholds_apply_to_description(self):
+        short_description = [{
+            "source": "Project website", "url": "https://example.org",
+            "summary": "A serious community project building useful tools for creators",
+            "observed_at": "2026-11-09T10:00:00Z",
+        }]
+        result = qualify_token({
+            "address": "MintShortNarrative",
+            "narrative_evidence": short_description,
+            "attention_evidence": ATTENTION,
+        })
+        self.assertFalse(result.narrative_pass)
+
+        sufficient_description = [{
+            "source": "Project website", "url": "https://example.org",
+            "summary": "A community project building open creative tools for independent digital artists",
+            "observed_at": "2026-11-09T10:00:00Z",
+        }]
+        result = qualify_token({
+            "address": "MintGoodNarrative",
+            "narrative_evidence": sufficient_description,
+            "attention_evidence": ATTENTION,
+        })
+        self.assertTrue(result.narrative_pass)
+
     def test_short_or_placeholder_narrative_is_rejected(self):
         weak = [{"source": "Project website", "url": "https://example.org",
                  "summary": "Coming soon", "observed_at": "now"}]
