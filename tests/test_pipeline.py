@@ -53,6 +53,12 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
             {"address": "MintNoMc"}, evidence_collector=passing_collector)
         self.assertEqual(result["status"], "rejected")
 
+    async def test_non_finite_starting_market_cap_is_rejected(self):
+        result = await evaluate_and_record(
+            {"address": "MintInvalidMc", "market_cap": float("nan")},
+            evidence_collector=passing_collector)
+        self.assertEqual(result["status"], "rejected")
+
     async def test_duplicate_is_not_recorded_twice(self):
         with tempfile.TemporaryDirectory() as directory:
             db = TrackerDatabase(Path(directory) / "pipeline.db")
