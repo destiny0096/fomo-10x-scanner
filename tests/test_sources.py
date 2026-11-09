@@ -4,7 +4,8 @@ import unittest
 from unittest.mock import patch
 
 from tracker.sources import (
-    PublicOnlyResolver, _MetaParser, _identity_match, _clean, is_safe_project_url,
+    PublicOnlyResolver, _MetaParser, _identity_match, is_safe_project_url,
+    collect_attention_evidence,
 )
 
 
@@ -45,6 +46,37 @@ class PublicResolverTests(unittest.IsolatedAsyncioTestCase):
             records = await PublicOnlyResolver().resolve("example.org", 443, socket.AF_UNSPEC)
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["host"], "8.8.8.8")
+
+    async def test_reddit_adapter_returns_measured_distinct_author_metrics(self):
+        class FakeResponse:
+            status = 200
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                return None
+            async def json(self, content_type=None):
+                return {"data": {"children": [
+                    {"data": {"id": "p1", "author": "alice",
+                              "title": "ExampleToken EXT community launch",
+                              "permalink": "/r/example/comments/p1/launch",
+                              "score": 3, "num_comments": 1}},
+                    {"data": {"id": "p2", "author": "bob",
+                              "title": "ExampleToken EXT project discussion",
+                              "permalink": "/r/example/comments/p2/discussion",
+                              "score": 1, "num_comments": 1}},
+                ]}}
+
+        class FakeSession:
+            def get(self, *args, **kwargs):
+                return FakeResponse()
+
+        evidence = await collect_attention_evidence(
+            FakeSession(), "MintABC", "ExampleToken", "EXT"
+        )
+        self.assertEqual(len(evidence), 1)
+        self.assertEqual(evidence[0]["distinct_authors"], 2)
+        self.assertEqual(evidence[0]["post_count"], 2)
+        self.assertEqual(evidence[0]["engagement"], 6)
 
     async def test_resolver_rejects_hosts_that_only_resolve_private(self):
         class FakeLoop:
