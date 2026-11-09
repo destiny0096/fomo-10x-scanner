@@ -10,9 +10,9 @@ from .database import TrackerDatabase, configured_database_path
 
 def create_backup() -> Path:
     database_path = configured_database_path()
-    backup_dir = Path(os.getenv("TRACKER_BACKUP_DIR", "")).expanduser()
-    if not str(backup_dir):
-        backup_dir = database_path.parent / "tracker_backups"
+    configured_backup_dir = os.getenv("TRACKER_BACKUP_DIR", "").strip()
+    backup_dir = (Path(configured_backup_dir).expanduser() if configured_backup_dir
+                  else database_path.parent / "tracker_backups")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     destination = backup_dir / f"tracker-{stamp}.db"
     database = TrackerDatabase(database_path)
