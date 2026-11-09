@@ -19,7 +19,7 @@ Only newly qualified records count toward the 100-token cohort. The tracker send
 
 The monitor polls DexScreener every five minutes by default, checks only Solana pairs for each recorded mint, and updates current and peak market cap. It uses the reported `marketCap` field only; FDV is not substituted when market cap is missing. The monitor continues observing the cohort after all 100 entries are recorded.
 
-The runtime database is `tracker_data.db` in the repository root by default. Set `TRACKER_DB_PATH` to a directory on the host's persistent disk (for example, `/data/fomo/tracker.db`) before starting the bot. The database creates its parent directory automatically, uses SQLite WAL mode and a 30-second busy timeout, and enforces the 100-record cap transactionally.
+The runtime database is `tracker_data.db` in the repository root by default. On Deplexo, configure `TRACKER_DB_PATH=/data/tracker_data.db`; Deplexo mounts a persistent data volume at `/data` by default. The volume survives container restarts and replacements on the same worker, but it is removed if the app itself is deleted. Verify the actual mount and write permissions in the app settings before enabling the tracker. On other hosts, set `TRACKER_DB_PATH` to a directory on that host's persistent disk. The database creates its parent directory automatically, uses SQLite WAL mode and a 30-second busy timeout, and enforces the 100-record cap transactionally.
 
 ### Database protection
 
@@ -29,7 +29,7 @@ The runtime database is `tracker_data.db` in the repository root by default. Set
 - `TrackerDatabase.integrity_check()` checks the live database; `backup_to(path)` creates a validated backup programmatically.
 - Backups are not yet scheduled automatically. The host must provide a scheduled task/cron facility, or an operator must run the command. Do not treat a backup stored only on the same ephemeral disk as durable protection.
 
-Do not use an ephemeral GitHub Actions runner as the long-term live tracker host. Before deployment, verify that the selected host provides persistent storage across restarts and that the backup directory is on a separate persistent volume or external backup destination.
+Do not use an ephemeral GitHub Actions runner as the long-term live tracker host. Before deployment, verify the `/data` mount and write permissions. A backup stored elsewhere on the same `/data` volume is useful for accidental file-level recovery but is not an independent disaster-recovery backup; periodically copy backups outside the app volume.
 
 ## Tests
 
