@@ -48,6 +48,28 @@ class MonitorIsolationTests(unittest.IsolatedAsyncioTestCase):
 
         to_thread.assert_awaited_once_with(create_backup)
 
+    async def test_negative_backup_interval_is_also_disabled(self):
+        class FakeDatabase:
+            def count(self):
+                return 0
+            def list_tokens(self):
+                return []
+
+        class FakeSession:
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                return None
+
+        with patch.dict(os.environ, {"TRACKER_BACKUP_INTERVAL_SECONDS": "-1"}), \
+             patch("tracker.market_monitor.aiohttp.ClientSession", return_value=FakeSession()), \
+             patch("tracker.backup.create_backup") as create_backup, \
+             patch("tracker.market_monitor.asyncio.sleep", new=AsyncMock(side_effect=asyncio.CancelledError)):
+            with self.assertRaises(asyncio.CancelledError):
+                await market_cap_monitor(database=FakeDatabase(), interval_seconds=60)
+
+        create_backup.assert_not_called()
+
     async def test_scheduled_backups_can_be_disabled(self):
         class FakeDatabase:
             def count(self):
