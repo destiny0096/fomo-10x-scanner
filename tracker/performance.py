@@ -1,4 +1,5 @@
 """Defensive market-cap multiple and cohort milestone calculations."""
+import math
 from __future__ import annotations
 
 
@@ -7,7 +8,7 @@ def _positive_number(value) -> float | None:
         number = float(value)
     except (TypeError, ValueError):
         return None
-    return number if number > 0 else None
+    return number if math.isfinite(number) and number > 0 else None
 
 
 def multiple(initial_mc: float, observed_mc: float) -> float | None:
