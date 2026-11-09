@@ -37,6 +37,28 @@ class IntegrationBridgeTests(unittest.IsolatedAsyncioTestCase):
         export.assert_called_once()
         send_csv.assert_awaited_once_with(Path("/tmp/results.csv"))
 
+    async def test_final_export_cannot_overwrite_live_database(self):
+        from pathlib import Path
+
+        class FakeDatabase:
+            path = Path("/tmp/tracker_results.csv")
+            def count(self):
+                return 100
+            def list_tokens(self):
+                return []
+
+        with patch.dict("os.environ", {"TRACKER_EXPORT_PATH": "/tmp/tracker_results.csv"}), \
+             patch("tracker.integration.TrackerDatabase", return_value=FakeDatabase()), \
+             patch("tracker.integration.evaluate_and_record", new=AsyncMock(return_value={"status": "qualified"})), \
+             patch("tracker.integration.send_progress_notification", new=AsyncMock(return_value=True)), \
+             patch("tracker.integration.export_results") as export, \
+             patch("tracker.integration.send_completion_export", new=AsyncMock(return_value=True)) as send_csv:
+            result = await track_alerted_token({"address": "Mint100", "symbol": "T100"})
+
+        self.assertEqual(result["status"], "qualified")
+        export.assert_not_called()
+        send_csv.assert_not_awaited()
+
     async def test_tracker_exception_is_contained(self):
         with patch("tracker.integration.evaluate_and_record", new=AsyncMock(side_effect=RuntimeError("db down"))):
             result = await track_alerted_token({"address": "MintBridge", "symbol": "BRG"})
