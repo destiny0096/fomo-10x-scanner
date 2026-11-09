@@ -10,11 +10,20 @@ class TrackerProgressNotificationTests(unittest.TestCase):
         self.assertIn("25/100", progress_message(25, [token]))
         self.assertIsNone(progress_message(24, [token]))
 
-    def test_hundredth_record_includes_final_report(self):
-        tokens = [{"address": "Mint1", "symbol": "ONE", "initial_mc": 100, "peak_mc": 1200, "current_mc": 1100}]
+    def test_hundredth_record_includes_full_final_report(self):
+        tokens = [
+            {
+                "address": f"Mint{i}",
+                "symbol": f"T{i}",
+                "initial_mc": 100,
+                "peak_mc": 1200 if i == 1 else 100,
+                "current_mc": 1100 if i == 1 else 100,
+            }
+            for i in range(100)
+        ]
         message = progress_message(100, tokens)
         self.assertIn("TEST 4 COMPLETE", message)
-        self.assertIn("Qualified tokens: 1/100", message)
+        self.assertIn("Qualified tokens: 100/100", message)
         self.assertIn("12.00x", message)
 
 
