@@ -19,7 +19,17 @@ Only newly qualified records count toward the 100-token cohort. The tracker send
 
 The monitor polls DexScreener every five minutes by default, checks only Solana pairs for each recorded mint, and updates current and peak market cap. It uses the reported `marketCap` field only; FDV is not substituted when market cap is missing. The monitor continues observing the cohort after all 100 entries are recorded.
 
-The runtime database is `tracker_data.db` in the repository root by default. It must live on persistent storage for results to survive process restarts. Do not use an ephemeral runner as the long-term live tracker host.
+The runtime database is `tracker_data.db` in the repository root by default. Set `TRACKER_DB_PATH` to a directory on the host's persistent disk (for example, `/data/fomo/tracker.db`) before starting the bot. The database creates its parent directory automatically, uses SQLite WAL mode and a 30-second busy timeout, and enforces the 100-record cap transactionally.
+
+### Database protection
+
+- Run `python -m tracker.backup` to create a timestamped SQLite backup.
+- Set `TRACKER_BACKUP_DIR` to a separate persistent volume/directory. If it is not set, backups go into `tracker_backups` beside the database; that is convenient but does not protect against loss of the whole disk.
+- Backups use SQLite's online backup API and are integrity-checked before the backup file is published.
+- `TrackerDatabase.integrity_check()` checks the live database; `backup_to(path)` creates a validated backup programmatically.
+- Backups are not yet scheduled automatically. The host must provide a scheduled task/cron facility, or an operator must run the command. Do not treat a backup stored only on the same ephemeral disk as durable protection.
+
+Do not use an ephemeral GitHub Actions runner as the long-term live tracker host. Before deployment, verify that the selected host provides persistent storage across restarts and that the backup directory is on a separate persistent volume or external backup destination.
 
 ## Tests
 
