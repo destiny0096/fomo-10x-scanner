@@ -53,6 +53,15 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
             {"address": "MintNoMc"}, evidence_collector=passing_collector)
         self.assertEqual(result["status"], "rejected")
 
+    async def test_missing_reported_market_cap_is_rejected_without_using_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = TrackerDatabase(Path(directory) / "pipeline.db")
+            result = await evaluate_and_record(
+                {"address": "MintFdvOnly", "market_cap": None, "fdv": 250000},
+                database=db, evidence_collector=passing_collector)
+            self.assertEqual(result["status"], "rejected")
+            self.assertEqual(db.count(), 0)
+
     async def test_non_finite_starting_market_cap_is_rejected(self):
         result = await evaluate_and_record(
             {"address": "MintInvalidMc", "market_cap": float("nan")},
