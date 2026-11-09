@@ -77,22 +77,36 @@ async def update_once(database: TrackerDatabase, session: aiohttp.ClientSession)
 
 
 async def market_cap_monitor(database: TrackerDatabase | None = None, interval_seconds: int = 300) -> None:
-    """Keep updating the 100-token cohort; never stop just because it is full."""
-    database = database or TrackerDatabase()
+    """Keep updating the 100-token cohort; never stop just because it is full.
+
+    Initialization and polling failures are contained so the optional tracker
+    monitor can never prevent the primary scanner from running.
+    """
+    try:
+        database = database or TrackerDatabase()
+    except Exception:
+        log.exception("Tracker database initialization failed; scanner will continue without market-cap monitoring")
+        return
+
     try:
         interval = max(60, int(interval_seconds))
     except (TypeError, ValueError):
         interval = 300
     timeout = aiohttp.ClientTimeout(total=20, connect=10)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        while True:
-            try:
-                total = database.count()
-                updated, missing = await update_once(database, session)
-                log.info("Tracker market-cap monitor: %s/%s tokens recorded; updated=%s missing=%s",
-                         total, database.count(), updated, missing)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                log.exception("Tracker market-cap monitor cycle failed")
-            await asyncio.sleep(interval)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            while True:
+                try:
+                    total = database.count()
+                    updated, missing = await update_once(database, session)
+                    log.info("Tracker market-cap monitor: %s/%s tokens recorded; updated=%s missing=%s",
+                             total, database.count(), updated, missing)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    log.exception("Tracker market-cap monitor cycle failed")
+                await asyncio.sleep(interval)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.exception("Tracker market-cap monitor could not start; scanner will continue")
