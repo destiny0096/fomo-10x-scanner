@@ -208,6 +208,7 @@ class ReportTests(unittest.TestCase):
         self.assertIn("Peak-multiple distribution:", report)
         self.assertIn("10x to <20x: 1", report)
         self.assertNotIn("\\n", report)
+        self.assertIn("highest market caps observed", report)
 
     def test_report_handles_missing_and_invalid_market_caps(self):
         rows = [
