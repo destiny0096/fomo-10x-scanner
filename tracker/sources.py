@@ -177,7 +177,7 @@ async def collect_narrative_evidence(
             evidence.append({
                 "source": "Public project website metadata",
                 "url": url,
-                "summary": f"{token_name or symbol}: {summary}"[:500],
+                "summary": summary[:500],
                 "observed_at": utc_now(),
             })
     # DexScreener metadata is retained for identity and later price tracking, not treated as narrative proof.
