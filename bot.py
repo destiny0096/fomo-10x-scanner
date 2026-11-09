@@ -10,6 +10,7 @@ from aiohttp import web
 from security_test import check_security, security_summary
 from lp_test import check_lp_status, lp_status_text
 from sell_route_test import check_sell_route, sell_route_text
+from tracker.integration import schedule_tracking
 
 
 # ============================================================
@@ -581,6 +582,15 @@ async def evaluate_pair(session, pair):
 
     # Only mark the token alerted after Telegram confirms success.
     await tg(session, message)
+
+    # Tracker runs in the background after the Telegram alert succeeds.
+    # Any tracker/network/database failure is isolated from scanner operation.
+    schedule_tracking({
+        "address": address,
+        "name": token.get("name", ""),
+        "symbol": token.get("symbol", ""),
+        "market_cap": mc,
+    })
 
     alerted.add(address)
     candidates.pop(address, None)
