@@ -69,9 +69,9 @@ class TrackerDatabase:
         temporary = target.with_name(target.name + ".tmp")
         try:
             with self._connect() as source:
-                with sqlite3.connect(str(temporary), timeout=30) as backup:
+                with closing(sqlite3.connect(str(temporary), timeout=30)) as backup:
                     source.backup(backup)
-            with sqlite3.connect(str(temporary)) as check:
+            with closing(sqlite3.connect(str(temporary))) as check:
                 result = check.execute("PRAGMA integrity_check").fetchone()
             if not result or result[0] != "ok":
                 raise sqlite3.DatabaseError("Backup integrity check failed")
