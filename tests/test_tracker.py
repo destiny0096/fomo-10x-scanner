@@ -127,6 +127,25 @@ class PersistenceTests(unittest.TestCase):
             self.assertTrue(backup.exists())
             self.assertTrue(TrackerDatabase(backup).integrity_check())
 
+    def test_backup_retention_keeps_only_configured_recent_files(self):
+        with tempfile.TemporaryDirectory() as d:
+            live_path = Path(d) / "live" / "tracker.db"
+            backup_dir = Path(d) / "backups"
+            backup_dir.mkdir()
+            TrackerDatabase(live_path).add_qualified(self._token(), "2026-11-09T10:00:00Z")
+            for name in ("tracker-20000101T000000Z.db", "tracker-20010101T000000Z.db"):
+                (backup_dir / name).write_text("old backup")
+            with patch.dict(os.environ, {
+                "TRACKER_DB_PATH": str(live_path),
+                "TRACKER_BACKUP_DIR": str(backup_dir),
+                "TRACKER_BACKUP_KEEP": "2",
+            }):
+                created = create_backup()
+            remaining = sorted(backup_dir.glob("tracker-*.db"))
+            self.assertEqual(len(remaining), 2)
+            self.assertIn(created, remaining)
+            self.assertFalse((backup_dir / "tracker-20000101T000000Z.db").exists())
+
     def test_backup_command_refuses_missing_live_database(self):
         with tempfile.TemporaryDirectory() as d:
             with patch.dict(os.environ, {"TRACKER_DB_PATH": str(Path(d) / "missing.db")}):
