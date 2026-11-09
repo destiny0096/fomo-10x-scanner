@@ -1,6 +1,7 @@
 import os
 import asyncio
 import logging
+import math
 import time
 from datetime import datetime, timezone
 
@@ -424,20 +425,28 @@ def best_solana_pairs(pairs):
 
     for pair in pairs:
 
-        if pair.get("chainId") != "solana":
+        # DexScreener payloads should contain pair objects, but malformed
+        # entries must not abort the entire scanner batch.
+        if not isinstance(pair, dict) or pair.get("chainId") != "solana":
             continue
 
         token = pair.get("baseToken") or {}
+        if not isinstance(token, dict):
+            continue
         address = token.get("address")
 
         if not address:
             continue
 
         liquidity_data = pair.get("liquidity") or {}
-
-        liquidity = float(
-            liquidity_data.get("usd") or 0
-        )
+        if not isinstance(liquidity_data, dict):
+            liquidity_data = {}
+        try:
+            liquidity = float(liquidity_data.get("usd") or 0)
+        except (TypeError, ValueError, OverflowError):
+            liquidity = 0.0
+        if not math.isfinite(liquidity) or liquidity < 0:
+            liquidity = 0.0
 
         current = best_pairs.get(address)
 
