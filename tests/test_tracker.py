@@ -205,7 +205,7 @@ class ReportTests(unittest.TestCase):
                  "qualified_at": "2026-11-09T10:00:00Z", "initial_mc": 100,
                  "current_mc": 150, "peak_mc": 1200,
                  "evidence_json": json.dumps({"narrative": NARRATIVE, "attention": ATTENTION})},
-                {"symbol": "TWO", "name": "Token Two", "address": "MintTwo",
+                {"symbol": "=2+2", "name": "Token Two", "address": "MintTwo",
                  "qualified_at": "2026-11-09T10:01:00Z", "initial_mc": 200,
                  "current_mc": 100, "peak_mc": 400, "evidence_json": "{}"},
             ]
@@ -216,6 +216,12 @@ class ReportTests(unittest.TestCase):
             self.assertEqual(exported[0]["symbol"], "ONE")
             self.assertEqual(exported[0]["peak_multiple"], "12.0")
             self.assertIn("Project website", exported[0]["narrative_evidence"])
+            self.assertEqual(exported[1]["symbol"], "'=2+2")
+
+    def test_csv_export_rejects_database_extension(self):
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(ValueError):
+                export_results([], Path(d) / "tracker.db")
 
 
 if __name__ == "__main__":
