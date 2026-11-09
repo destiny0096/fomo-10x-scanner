@@ -1,17 +1,18 @@
 """Free public evidence adapters for DexScreener and Reddit.
 
-These adapters do not use paid APIs or claim that a social link itself proves attention.
-Reddit attention is counted only from recent, publicly retrievable posts that match the
-token identity and have observable engagement. All thresholds are explicit defaults.
+Project-site URLs are untrusted input. Website requests use HTTPS only, reject
+private/local DNS destinations, and do not follow redirects.
 """
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import re
+import socket
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import aiohttp
 
@@ -26,6 +27,61 @@ def utc_now() -> str:
 
 def _clean(value: str) -> str:
     return re.sub(r"\s+", " ", value or "").strip()
+
+
+def is_safe_project_url(url: str) -> bool:
+    """Allow only HTTPS URLs with a hostname and no embedded credentials."""
+    try:
+        parsed = urlsplit(str(url))
+        host = parsed.hostname
+        # Reject userinfo, non-HTTPS schemes, missing hosts, and malformed ports.
+        _ = parsed.port
+        if parsed.scheme.lower() != "https" or not host or parsed.username or parsed.password:
+            return False
+        host = host.rstrip(".").lower()
+        if host in {"localhost", "metadata.google.internal"} or host.endswith(
+            (".localhost", ".local", ".internal", ".test", ".invalid")
+        ):
+            return False
+        try:
+            return ipaddress.ip_address(host).is_global
+        except ValueError:
+            # DNS names are checked and pinned by PublicOnlyResolver below.
+            return True
+    except (TypeError, ValueError):
+        return False
+
+
+class PublicOnlyResolver(aiohttp.abc.AbstractResolver):
+    """Resolve hostnames only to globally routable addresses."""
+
+    async def resolve(self, host, port=0, family=socket.AF_INET):
+        loop = asyncio.get_running_loop()
+        records = await loop.getaddrinfo(
+            host, port, family=family, type=socket.SOCK_STREAM
+        )
+        safe = []
+        for resolved_family, proto, _canonname, sockaddr in records:
+            try:
+                address = ipaddress.ip_address(sockaddr[0])
+            except ValueError:
+                continue
+            if not address.is_global:
+                continue
+            safe.append({
+                "hostname": host,
+                "host": str(address),
+                "port": port,
+                "family": resolved_family,
+                "proto": proto,
+                "flags": socket.AI_NUMERICHOST,
+            })
+        if not safe:
+            raise OSError(f"Host {host!r} did not resolve to a public IP address")
+        return safe
+
+    async def close(self):
+        return None
 
 
 class _MetaParser(HTMLParser):
@@ -65,8 +121,11 @@ async def _get_json(session: aiohttp.ClientSession, url: str) -> dict[str, Any] 
 
 
 async def _get_text(session: aiohttp.ClientSession, url: str) -> str | None:
+    if not is_safe_project_url(url):
+        return None
     try:
-        async with session.get(url, headers={"User-Agent": USER_AGENT}, allow_redirects=True) as response:
+        # Redirects are disabled so a public page cannot redirect into a private host.
+        async with session.get(url, headers={"User-Agent": USER_AGENT}, allow_redirects=False) as response:
             if response.status != 200:
                 return None
             if "text/html" not in response.headers.get("Content-Type", "").lower():
@@ -87,7 +146,12 @@ async def collect_narrative_evidence(
     sol_pairs = [p for p in pairs if isinstance(p, dict) and p.get("chainId") == "solana"]
     if not sol_pairs:
         return [], None
-    pair = max(sol_pairs, key=lambda p: float((p.get("liquidity") or {}).get("usd") or 0))
+    def liquidity(pair):
+        try:
+            return float((pair.get("liquidity") or {}).get("usd") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+    pair = max(sol_pairs, key=liquidity)
     base = pair.get("baseToken") or {}
     info = pair.get("info") or {}
     token_name = token_name or str(base.get("name") or "")
@@ -96,7 +160,7 @@ async def collect_narrative_evidence(
     websites = info.get("websites") or []
     for site in websites[:2]:
         url = str(site.get("url") or "") if isinstance(site, dict) else ""
-        if not url.startswith(("https://", "http://")):
+        if not is_safe_project_url(url):
             continue
         html = await _get_text(session, url)
         if not html:
@@ -154,8 +218,11 @@ async def collect_attention_evidence(
         author = str(post.get("author") or "")
         if not author or author == "[deleted]" or not _identity_match(text, address, name, symbol):
             continue
-        score = max(0, int(post.get("score") or 0))
-        comments = max(0, int(post.get("num_comments") or 0))
+        try:
+            score = max(0, int(post.get("score") or 0))
+            comments = max(0, int(post.get("num_comments") or 0))
+        except (TypeError, ValueError):
+            continue
         if score + comments <= 0:
             continue
         authors.add(author.lower())
@@ -183,7 +250,8 @@ async def collect_token_evidence(
 ) -> dict[str, Any]:
     """Collect both evidence categories without raising network errors to the scanner."""
     timeout = aiohttp.ClientTimeout(total=timeout_seconds)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
+    connector = aiohttp.TCPConnector(resolver=PublicOnlyResolver())
+    async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
         narrative, pair = await collect_narrative_evidence(session, address, token_name, symbol)
         resolved_name = token_name or str(((pair or {}).get("baseToken") or {}).get("name") or "")
         resolved_symbol = symbol or str(((pair or {}).get("baseToken") or {}).get("symbol") or "")
