@@ -20,7 +20,7 @@ def _market_cap(pair: dict) -> float | None:
     value = pair.get("marketCap")
     try:
         result = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     return result if math.isfinite(result) and result > 0 else None
 
@@ -56,7 +56,7 @@ async def fetch_market_caps(session: aiohttp.ClientSession, addresses: list[str]
                 continue
             try:
                 liquidity = float((pair.get("liquidity") or {}).get("usd") or 0)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 liquidity = 0.0
             if not math.isfinite(liquidity) or liquidity < 0:
                 liquidity = 0.0
@@ -95,12 +95,12 @@ async def market_cap_monitor(database: TrackerDatabase | None = None, interval_s
 
     try:
         interval = max(60, int(interval_seconds))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         interval = 300
     try:
         backup_interval = int(os.getenv("TRACKER_BACKUP_INTERVAL_SECONDS", "21600"))
         backup_interval = max(60, backup_interval) if backup_interval > 0 else 0
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         log.warning("Invalid TRACKER_BACKUP_INTERVAL_SECONDS; using 21600 seconds")
         backup_interval = 21600
     last_backup = time.monotonic() - backup_interval if backup_interval else 0.0
