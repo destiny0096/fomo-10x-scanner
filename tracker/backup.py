@@ -10,6 +10,8 @@ from .database import TrackerDatabase, configured_database_path
 
 def create_backup() -> Path:
     database_path = configured_database_path()
+    if not database_path.is_file():
+        raise FileNotFoundError(f"Tracker database does not exist: {database_path}")
     configured_backup_dir = os.getenv("TRACKER_BACKUP_DIR", "").strip()
     backup_dir = (Path(configured_backup_dir).expanduser() if configured_backup_dir
                   else database_path.parent / "tracker_backups")
