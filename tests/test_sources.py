@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from tracker.sources import (
     PublicOnlyResolver, _MetaParser, _identity_match, is_safe_project_url,
-    collect_attention_evidence,
+    collect_attention_evidence, _get_text,
 )
 
 
@@ -34,6 +34,36 @@ class SourceAdapterTests(unittest.TestCase):
 
 
 class PublicResolverTests(unittest.IsolatedAsyncioTestCase):
+    async def test_project_site_html_is_size_limited(self):
+        class FakeContent:
+            def __init__(self, chunks):
+                self.chunks = chunks
+            async def iter_chunked(self, size):
+                for chunk in self.chunks:
+                    yield chunk
+
+        class FakeResponse:
+            status = 200
+            headers = {"Content-Type": "text/html; charset=utf-8"}
+            charset = "utf-8"
+            def __init__(self, chunks):
+                self.content = FakeContent(chunks)
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                return None
+
+        class FakeSession:
+            def __init__(self, chunks):
+                self.response = FakeResponse(chunks)
+            def get(self, *args, **kwargs):
+                return self.response
+
+        html = b"<html><meta name='description' content='Project description'></html>"
+        self.assertEqual(await _get_text(FakeSession([html]), "https://example.org"), html.decode())
+        oversized = b"x" * 500_001
+        self.assertIsNone(await _get_text(FakeSession([oversized]), "https://example.org"))
+
     async def test_resolver_returns_only_public_ip_addresses(self):
         class FakeLoop:
             async def getaddrinfo(self, host, port, family, type):
