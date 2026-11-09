@@ -13,7 +13,12 @@ MAX_TRADES = 100
 def configured_database_path() -> Path:
     """Resolve the runtime DB path, allowing hosts to point at a persistent disk."""
     configured = os.getenv("TRACKER_DB_PATH", "").strip()
-    return Path(configured).expanduser() if configured else DEFAULT_DB
+    if configured:
+        return Path(configured).expanduser()
+    persistent_mount = Path("/data")
+    if persistent_mount.is_dir() and os.access(persistent_mount, os.W_OK):
+        return persistent_mount / "tracker_data.db"
+    return DEFAULT_DB
 
 
 class TrackerDatabase:
