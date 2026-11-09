@@ -48,7 +48,7 @@ def is_safe_project_url(url: str) -> bool:
         except ValueError:
             # DNS names are checked and pinned by PublicOnlyResolver below.
             return True
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return False
 
 
@@ -157,7 +157,7 @@ async def collect_narrative_evidence(
     def liquidity(pair):
         try:
             return float((pair.get("liquidity") or {}).get("usd") or 0)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return 0.0
     pair = max(sol_pairs, key=liquidity)
     base = pair.get("baseToken") or {}
@@ -230,7 +230,7 @@ async def collect_attention_evidence(
         try:
             score = max(0, int(post.get("score") or 0))
             comments = max(0, int(post.get("num_comments") or 0))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             continue
         if score + comments <= 0:
             continue
