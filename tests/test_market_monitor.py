@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 from tracker.market_monitor import _market_cap, fetch_market_caps, market_cap_monitor
 
 
-class MarketCapParsingTests(unittest.TestCase):
+class MarketCapParsingTests(unittest.IsolatedAsyncioTestCase):
     def test_uses_reported_market_cap(self):
         self.assertEqual(_market_cap({"marketCap": 125000}), 125000.0)
 
