@@ -21,7 +21,7 @@ CSV_FIELDS = [
 def _spreadsheet_safe(value: Any) -> str:
     """Prevent untrusted text from being interpreted as a spreadsheet formula."""
     text = "" if value is None else str(value)
-    if text.lstrip(" \\t\\r\\n").startswith(("=", "+", "-", "@")):
+    if text.lstrip(" \t\r\n").startswith(("=", "+", "-", "@")):
         return "'" + text
     return text
 
