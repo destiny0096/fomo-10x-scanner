@@ -32,7 +32,7 @@ class QualificationTests(unittest.TestCase):
     def test_narrative_word_and_character_thresholds_apply_to_description(self):
         short_description = [{
             "source": "Project website", "url": "https://example.org",
-            "summary": "A serious community project building useful tools for creators",
+            "summary": "Community-driven development creates useful infrastructure for artists",
             "observed_at": "2026-11-09T10:00:00Z",
         }]
         result = qualify_token({
