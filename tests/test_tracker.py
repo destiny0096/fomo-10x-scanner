@@ -156,6 +156,8 @@ class ReportTests(unittest.TestCase):
     def test_performance_report(self):
         rows = [{"symbol":"A","address":"MintA","initial_mc":100,"peak_mc":1200}]
         self.assertEqual(multiple(100,1200),12)
+        self.assertIsNone(multiple(100, float("nan")))
+        self.assertIsNone(multiple(100, float("inf")))
         self.assertEqual(milestone_hits(rows)["10x"],1)
         report = build_report(rows)
         self.assertIn("12.00x", report)
