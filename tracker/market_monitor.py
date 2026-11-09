@@ -104,7 +104,7 @@ async def market_cap_monitor(database: TrackerDatabase | None = None, interval_s
     except (TypeError, ValueError):
         log.warning("Invalid TRACKER_BACKUP_INTERVAL_SECONDS; using 21600 seconds")
         backup_interval = 21600
-    last_backup = 0.0
+    last_backup = time.monotonic() - backup_interval if backup_interval else 0.0
 
     timeout = aiohttp.ClientTimeout(total=20, connect=10)
     try:
