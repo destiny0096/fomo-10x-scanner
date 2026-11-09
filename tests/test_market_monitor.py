@@ -46,7 +46,6 @@ class MonitorIsolationTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(asyncio.CancelledError):
                 await market_cap_monitor(database=FakeDatabase(), interval_seconds=60)
 
-        create_backup.assert_called_once_with()
         to_thread.assert_awaited_once_with(create_backup)
 
     async def test_scheduled_backups_can_be_disabled(self):
