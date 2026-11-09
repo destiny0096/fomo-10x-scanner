@@ -6,9 +6,10 @@ from tracker.database import TrackerDatabase
 from tracker.pipeline import evaluate_and_record
 
 NARRATIVE = [{"source": "Project website", "url": "https://example.org/about",
-              "summary": "A documented project story", "observed_at": "2026-11-09T10:00:00Z"}]
+              "summary": "A community-led project building open tools for creators and digital culture.", "observed_at": "2026-11-09T10:00:00Z"}]
 ATTENTION = [{"source": "Reddit public search", "url": "https://reddit.com/r/example/post",
-              "summary": "Two distinct matching authors and observable engagement",
+              "summary": "Two independent authors discussed the project with measurable engagement",
+              "distinct_authors": 2, "post_count": 2, "engagement": 7,
               "observed_at": "2026-11-09T10:01:00Z"}]
 
 async def passing_collector(**kwargs):
