@@ -22,7 +22,7 @@ def build_report(tokens: list[dict]) -> str:
         "FOMO 10X TRACKER TEST 4",
         f"Qualified tokens: {count}/100",
         "",
-        "Peak market-cap performance:",
+        "Peak market-cap performance (highest observed sample):",
     ]
     lines.extend(f"- Reached {label}: {number}" for label, number in milestone_hits(tokens).items())
 
@@ -69,6 +69,7 @@ def build_report(tokens: list[dict]) -> str:
 
     lines.extend([
         "",
+        "Peak values are the highest market caps observed by periodic polling; short-lived moves between checks may be missed.",
         "Multiples compare market cap with the starting market cap; they are not trading PnL.",
     ])
     return "\n".join(lines)
