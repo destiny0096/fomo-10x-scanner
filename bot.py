@@ -421,6 +421,16 @@ def best_solana_pairs(pairs):
         )
         return {}
 
+    def pair_liquidity(pair):
+        data = pair.get("liquidity") or {}
+        if not isinstance(data, dict):
+            return 0.0
+        try:
+            value = float(data.get("usd") or 0)
+        except (TypeError, ValueError, OverflowError):
+            return 0.0
+        return value if math.isfinite(value) and value >= 0 else 0.0
+
     best_pairs = {}
 
     for pair in pairs:
@@ -438,31 +448,11 @@ def best_solana_pairs(pairs):
         if not address:
             continue
 
-        liquidity_data = pair.get("liquidity") or {}
-        if not isinstance(liquidity_data, dict):
-            liquidity_data = {}
-        try:
-            liquidity = float(liquidity_data.get("usd") or 0)
-        except (TypeError, ValueError, OverflowError):
-            liquidity = 0.0
-        if not math.isfinite(liquidity) or liquidity < 0:
-            liquidity = 0.0
-
+        liquidity = pair_liquidity(pair)
         current = best_pairs.get(address)
 
-        if current is None:
-
+        if current is None or liquidity > pair_liquidity(current):
             best_pairs[address] = pair
-
-        else:
-
-            current_liquidity = float(
-                (current.get("liquidity") or {}).get("usd")
-                or 0
-            )
-
-            if liquidity > current_liquidity:
-                best_pairs[address] = pair
 
     return best_pairs
 
