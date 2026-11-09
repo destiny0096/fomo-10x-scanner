@@ -125,9 +125,10 @@ async def market_cap_monitor(database: TrackerDatabase | None = None, interval_s
                         from .backup import create_backup
                         backup_path = await asyncio.to_thread(create_backup)
                         log.info("Tracker database backup created: %s", backup_path)
+                        last_backup = time.monotonic()
                     except Exception:
+                        # Leave the timer due so a transient failure is retried next cycle.
                         log.exception("Scheduled tracker database backup failed")
-                    last_backup = time.monotonic()
 
                 await asyncio.sleep(interval)
     except asyncio.CancelledError:
