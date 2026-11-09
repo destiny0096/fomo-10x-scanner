@@ -27,7 +27,7 @@ The runtime database uses `/data/tracker_data.db` automatically when `/data` exi
 - Set `TRACKER_BACKUP_DIR` to a separate persistent volume/directory. If it is not set, backups go into `tracker_backups` beside the database; that is convenient but does not protect against loss of the whole disk.
 - Backups use SQLite's online backup API and are integrity-checked before the backup file is published.
 - `TrackerDatabase.integrity_check()` checks the live database; `backup_to(path)` creates a validated backup programmatically.
-- Backups are not yet scheduled automatically. The host must provide a scheduled task/cron facility, or an operator must run the command. Do not treat a backup stored only on the same ephemeral disk as durable protection.
+- When the bot is running, the market-cap monitor creates a validated backup at startup and every 6 hours by default. Set `TRACKER_BACKUP_INTERVAL_SECONDS=0` to disable scheduled backups, `TRACKER_BACKUP_KEEP` to change retention (default 28 files), and `TRACKER_BACKUP_DIR` to choose the destination. Backup failures are logged and do not stop the scanner. Do not treat a backup stored only on the same volume as independent disaster-recovery protection.
 
 Do not use an ephemeral GitHub Actions runner as the long-term live tracker host. Before deployment, verify the `/data` mount and write permissions. A backup stored elsewhere on the same `/data` volume is useful for accidental file-level recovery but is not an independent disaster-recovery backup; periodically copy backups outside the app volume.
 
