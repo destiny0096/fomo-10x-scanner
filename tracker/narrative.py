@@ -42,7 +42,7 @@ class Evidence:
 def _is_substantive_narrative(evidence: Evidence) -> bool:
     summary = " ".join(evidence.summary.split())
     lowered = summary.casefold()
-    if any(re.search(rf"\\b{re.escape(phrase)}\\b", lowered) for phrase in GENERIC_NARRATIVE_PHRASES):
+    if any(re.search(r"\b" + re.escape(phrase) + r"\b", lowered) for phrase in GENERIC_NARRATIVE_PHRASES):
         return False
     words = summary.split()
     return len(summary) >= MIN_NARRATIVE_CHARACTERS and len(words) >= MIN_NARRATIVE_WORDS
