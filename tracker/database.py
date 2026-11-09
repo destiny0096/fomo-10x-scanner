@@ -1,5 +1,6 @@
 """SQLite persistence for qualified tokens and market-cap observations."""
 import json
+import math
 import os
 import sqlite3
 from contextlib import closing, contextmanager
@@ -91,7 +92,7 @@ class TrackerDatabase:
             mc = float(token.get("market_cap") or 0)
         except (TypeError, ValueError):
             return "invalid"
-        if not address or mc <= 0:
+        if not address or not math.isfinite(mc) or mc <= 0:
             return "invalid"
         evidence = json.dumps(
             {"narrative": token.get("narrative_evidence", []),
@@ -122,7 +123,7 @@ class TrackerDatabase:
             value = float(market_cap)
         except (TypeError, ValueError):
             return False
-        if value <= 0:
+        if not math.isfinite(value) or value <= 0:
             return False
         with self._connect() as db:
             cursor = db.execute(
