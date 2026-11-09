@@ -85,6 +85,12 @@ class PersistenceTests(unittest.TestCase):
             self.assertTrue(backup.exists())
             self.assertTrue(TrackerDatabase(backup).integrity_check())
 
+    def test_backup_command_refuses_missing_live_database(self):
+        with tempfile.TemporaryDirectory() as d:
+            with patch.dict(os.environ, {"TRACKER_DB_PATH": str(Path(d) / "missing.db")}):
+                with self.assertRaises(FileNotFoundError):
+                    create_backup()
+
     def test_backup_cannot_overwrite_live_database(self):
         with tempfile.TemporaryDirectory() as d:
             db = TrackerDatabase(Path(d) / "tracker.db")
