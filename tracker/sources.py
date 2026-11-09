@@ -61,7 +61,7 @@ class PublicOnlyResolver(aiohttp.abc.AbstractResolver):
             host, port, family=family, type=socket.SOCK_STREAM
         )
         safe = []
-        for resolved_family, proto, _canonname, sockaddr in records:
+        for resolved_family, _socktype, proto, _canonname, sockaddr in records:
             try:
                 address = ipaddress.ip_address(sockaddr[0])
             except ValueError:
