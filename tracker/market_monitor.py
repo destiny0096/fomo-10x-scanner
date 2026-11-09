@@ -45,7 +45,7 @@ async def fetch_market_caps(session: aiohttp.ClientSession, addresses: list[str]
 
         requested = set(batch)
         for pair in payload.get("pairs") or []:
-            if pair.get("chainId") != "solana":
+            if not isinstance(pair, dict) or pair.get("chainId") != "solana":
                 continue
             base = pair.get("baseToken") or {}
             address = str(base.get("address") or "")
