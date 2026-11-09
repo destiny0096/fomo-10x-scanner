@@ -1,6 +1,7 @@
 """Periodic DexScreener market-cap updates for qualified tracker tokens."""
 import asyncio
 import logging
+import math
 from datetime import datetime, timezone
 
 import aiohttp
@@ -19,7 +20,7 @@ def _market_cap(pair: dict) -> float | None:
         result = float(value)
     except (TypeError, ValueError):
         return None
-    return result if result > 0 else None
+    return result if math.isfinite(result) and result > 0 else None
 
 
 async def fetch_market_caps(session: aiohttp.ClientSession, addresses: list[str]) -> dict[str, float]:
@@ -54,6 +55,8 @@ async def fetch_market_caps(session: aiohttp.ClientSession, addresses: list[str]
             try:
                 liquidity = float((pair.get("liquidity") or {}).get("usd") or 0)
             except (TypeError, ValueError):
+                liquidity = 0.0
+            if not math.isfinite(liquidity) or liquidity < 0:
                 liquidity = 0.0
             previous = found.get(address)
             if previous is None or liquidity > previous[0]:
