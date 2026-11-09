@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from tracker.integration import track_alerted_token
+from tracker.integration import drain_tracking_tasks, track_alerted_token, _background_tasks
 
 
 class IntegrationBridgeTests(unittest.IsolatedAsyncioTestCase):
@@ -58,6 +58,43 @@ class IntegrationBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["status"], "qualified")
         export.assert_not_called()
         send_csv.assert_not_awaited()
+
+    async def test_drain_waits_for_background_tracker_tasks(self):
+        import asyncio
+        started = asyncio.Event()
+        finish = asyncio.Event()
+
+        async def work():
+            started.set()
+            await finish.wait()
+
+        task = asyncio.create_task(work())
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+        await started.wait()
+        waiter = asyncio.create_task(drain_tracking_tasks(timeout_seconds=1))
+        await asyncio.sleep(0)
+        self.assertFalse(waiter.done())
+        finish.set()
+        await waiter
+        self.assertTrue(task.done())
+        self.assertNotIn(task, _background_tasks)
+
+    async def test_drain_cancels_task_after_timeout(self):
+        import asyncio
+        started = asyncio.Event()
+
+        async def work():
+            started.set()
+            await asyncio.Event().wait()
+
+        task = asyncio.create_task(work())
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+        await started.wait()
+        await drain_tracking_tasks(timeout_seconds=0.01)
+        self.assertTrue(task.cancelled())
+        self.assertNotIn(task, _background_tasks)
 
     async def test_tracker_exception_is_contained(self):
         with patch("tracker.integration.evaluate_and_record", new=AsyncMock(side_effect=RuntimeError("db down"))):
