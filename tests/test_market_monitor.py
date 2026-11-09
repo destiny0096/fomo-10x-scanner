@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from tracker.market_monitor import _market_cap, market_cap_monitor
+from tracker.market_monitor import _market_cap, fetch_market_caps, market_cap_monitor
 
 
 class MarketCapParsingTests(unittest.TestCase):
@@ -13,6 +13,36 @@ class MarketCapParsingTests(unittest.TestCase):
 
     def test_does_not_substitute_fdv_for_market_cap(self):
         self.assertIsNone(_market_cap({"fdv": 900000}))
+
+    async def test_fetch_uses_solana_base_token_reported_market_cap(self):
+        class Response:
+            status = 200
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                return None
+            async def json(self, content_type=None):
+                return {"pairs": [
+                    {"chainId": "solana", "baseToken": {"address": "MintA"},
+                     "marketCap": 50000, "liquidity": {"usd": 1000}},
+                    {"chainId": "ethereum", "baseToken": {"address": "MintA"},
+                     "marketCap": 999999, "liquidity": {"usd": 999999}},
+                    {"chainId": "solana", "baseToken": {"address": "MintB"},
+                     "fdv": 80000, "liquidity": {"usd": 500}},
+                    {"chainId": "solana", "baseToken": {"address": "MintA"},
+                     "marketCap": 60000, "liquidity": {"usd": 2000}},
+                    None,
+                ]}
+
+        class Session:
+            def get(self, url):
+                self.url = url
+                return Response()
+
+        session = Session()
+        values = await fetch_market_caps(session, ["MintA", "MintB"])
+        self.assertEqual(values, {"MintA": 60000.0})
+        self.assertIn("MintA,MintB", session.url)
 
     def test_rejects_missing_zero_and_invalid_values(self):
         for pair in ({}, {"marketCap": 0}, {"marketCap": "unknown"}, {"marketCap": "nan"}, {"marketCap": "inf"}):
