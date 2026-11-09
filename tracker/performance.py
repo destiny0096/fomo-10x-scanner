@@ -1,6 +1,7 @@
 """Defensive market-cap multiple and cohort milestone calculations."""
-import math
 from __future__ import annotations
+
+import math
 
 
 def _positive_number(value) -> float | None:
