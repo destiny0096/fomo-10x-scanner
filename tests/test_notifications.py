@@ -25,6 +25,9 @@ class TrackerProgressNotificationTests(unittest.TestCase):
         self.assertIn("TEST 4 COMPLETE", message)
         self.assertIn("Qualified tokens: 100/100", message)
         self.assertIn("12.00x", message)
+        self.assertIn("Peak-multiple distribution:", message)
+        self.assertIn("Median peak multiple", message)
+        self.assertIn("not trading PnL", message)
 
 
 if __name__ == "__main__":
