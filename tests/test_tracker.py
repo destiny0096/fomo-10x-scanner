@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tracker.database import TrackerDatabase
+from tracker.database import TrackerDatabase, configured_database_path
 from tracker.backup import create_backup
 from tracker.performance import milestone_hits, multiple
 from tracker.report import build_report
@@ -49,6 +49,11 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(reopened.list_tokens()[0]["peak_mc"],25000)
             self.assertEqual(reopened.count(),1)
             self.assertTrue(reopened.integrity_check())
+
+    def test_writable_data_mount_is_selected_by_default(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("tracker.database.Path.is_dir", return_value=True), patch("tracker.database.os.access", return_value=True):
+                self.assertEqual(configured_database_path(), Path("/data/tracker_data.db"))
 
     def test_environment_path_override(self):
         with tempfile.TemporaryDirectory() as d:
