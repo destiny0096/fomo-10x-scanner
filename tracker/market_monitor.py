@@ -2,6 +2,8 @@
 import asyncio
 import logging
 import math
+import os
+import time
 from datetime import datetime, timezone
 
 import aiohttp
@@ -95,6 +97,15 @@ async def market_cap_monitor(database: TrackerDatabase | None = None, interval_s
         interval = max(60, int(interval_seconds))
     except (TypeError, ValueError):
         interval = 300
+    try:
+        backup_interval = int(os.getenv("TRACKER_BACKUP_INTERVAL_SECONDS", "21600"))
+        if backup_interval > 0:
+            backup_interval = max(60, backup_interval)
+    except (TypeError, ValueError):
+        log.warning("Invalid TRACKER_BACKUP_INTERVAL_SECONDS; using 21600 seconds")
+        backup_interval = 21600
+    last_backup = 0.0
+
     timeout = aiohttp.ClientTimeout(total=20, connect=10)
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -108,6 +119,16 @@ async def market_cap_monitor(database: TrackerDatabase | None = None, interval_s
                     raise
                 except Exception:
                     log.exception("Tracker market-cap monitor cycle failed")
+
+                if backup_interval and time.monotonic() - last_backup >= backup_interval:
+                    try:
+                        from .backup import create_backup
+                        backup_path = await asyncio.to_thread(create_backup)
+                        log.info("Tracker database backup created: %s", backup_path)
+                    except Exception:
+                        log.exception("Scheduled tracker database backup failed")
+                    last_backup = time.monotonic()
+
                 await asyncio.sleep(interval)
     except asyncio.CancelledError:
         raise
