@@ -33,13 +33,13 @@ async def track_alerted_token(token: dict[str, Any]) -> dict[str, Any]:
         # Only newly inserted records can trigger progress notifications.
         if result.get("status") == "qualified":
             count = database.count()
-            message = progress_message(count, database.list_tokens())
-            if message:
-                try:
+            try:
+                message = progress_message(count, database.list_tokens())
+                if message:
                     await send_progress_notification(message)
-                except Exception:
-                    # Telegram progress delivery must not suppress the final CSV attempt.
-                    logger.exception("Tracker progress notification raised unexpectedly")
+            except Exception:
+                # Report formatting or Telegram errors must not suppress the final CSV attempt.
+                logger.exception("Tracker progress notification failed unexpectedly")
             if count == 100:
                 configured_export = os.getenv("TRACKER_EXPORT_PATH", "").strip()
                 export_path = (
