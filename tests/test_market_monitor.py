@@ -1,6 +1,7 @@
 import unittest
+from unittest.mock import patch
 
-from tracker.market_monitor import _market_cap
+from tracker.market_monitor import _market_cap, market_cap_monitor
 
 
 class MarketCapParsingTests(unittest.TestCase):
@@ -18,3 +19,9 @@ class MarketCapParsingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MonitorIsolationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_database_initialization_failure_is_contained(self):
+        with patch("tracker.market_monitor.TrackerDatabase", side_effect=OSError("disk unavailable")):
+            await market_cap_monitor(interval_seconds=60)
