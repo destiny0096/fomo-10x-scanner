@@ -44,6 +44,8 @@ async def track_alerted_token(token: dict[str, Any]) -> dict[str, Any]:
                     else database.path.parent / "tracker_results.csv"
                 )
                 try:
+                    if export_path.resolve() == database.path.resolve():
+                        raise ValueError("Tracker results export cannot overwrite the live database")
                     completed_csv = export_results(database.list_tokens(), export_path)
                     await send_completion_export(completed_csv)
                 except Exception:
