@@ -212,6 +212,7 @@ async def collect_attention_evidence(
     matches = []
     authors = set()
     engagement = 0
+    seen_posts = set()
     for child in children:
         post = (child or {}).get("data") or {}
         text = _clean(f"{post.get('title', '')} {post.get('selftext', '')}")
@@ -225,18 +226,26 @@ async def collect_attention_evidence(
             continue
         if score + comments <= 0:
             continue
+        permalink = str(post.get("permalink") or "")
+        if not permalink.startswith("/") or permalink.startswith("//"):
+            continue
+        post_id = str(post.get("id") or permalink)
+        if post_id in seen_posts:
+            continue
+        seen_posts.add(post_id)
         authors.add(author.lower())
         engagement += score + comments
-        permalink = str(post.get("permalink") or "")
-        if permalink.startswith("/"):
-            matches.append((f"https://www.reddit.com{permalink}", score, comments))
-    if len(authors) < min_posts or engagement < min_total_engagement or not matches:
+        matches.append((f"https://www.reddit.com{permalink}", score, comments))
+    if len(authors) < min_posts or len(matches) < min_posts or engagement < min_total_engagement:
         return []
     sample = matches[:3]
     links = ", ".join(url for url, _, _ in sample)
     return [{
         "source": "Reddit public search",
         "url": sample[0][0],
+        "distinct_authors": len(authors),
+        "post_count": len(matches),
+        "engagement": engagement,
         "summary": (
             f"{len(authors)} distinct matching authors in recent public posts; "
             f"at least {engagement} combined post score/comments observed. Sample posts: {links}"
