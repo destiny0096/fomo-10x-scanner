@@ -95,7 +95,7 @@ class TrackerDatabase:
         address = str(token.get("address", "")).strip()
         try:
             mc = float(token.get("market_cap") or 0)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return "invalid"
         if not address or not math.isfinite(mc) or mc <= 0:
             return "invalid"
@@ -126,7 +126,7 @@ class TrackerDatabase:
     def record_market_cap(self, address: str, market_cap: float, observed_at: str) -> bool:
         try:
             value = float(market_cap)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return False
         if not math.isfinite(value) or value <= 0:
             return False
