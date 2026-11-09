@@ -18,6 +18,14 @@ CSV_FIELDS = [
 ]
 
 
+def _spreadsheet_safe(value: Any) -> str:
+    """Prevent untrusted text from being interpreted as a spreadsheet formula."""
+    text = "" if value is None else str(value)
+    if text.lstrip(" \\t\\r\\n").startswith(("=", "+", "-", "@")):
+        return "'" + text
+    return text
+
+
 def _evidence_columns(token: dict[str, Any]) -> tuple[str, str]:
     raw = token.get("evidence_json") or "{}"
     try:
@@ -35,6 +43,8 @@ def _evidence_columns(token: dict[str, Any]) -> tuple[str, str]:
 def export_results(tokens: list[dict[str, Any]], destination: str | Path) -> Path:
     """Write a deterministic, spreadsheet-friendly CSV using an atomic replace."""
     target = Path(destination).expanduser()
+    if target.suffix.lower() != ".csv":
+        raise ValueError("Tracker results export destination must use a .csv extension")
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(target.name + ".tmp")
     ranked = sorted(
@@ -50,17 +60,17 @@ def export_results(tokens: list[dict[str, Any]], destination: str | Path) -> Pat
                 narrative, attention = _evidence_columns(token)
                 writer.writerow({
                     "rank": rank,
-                    "symbol": token.get("symbol", ""),
-                    "name": token.get("name", ""),
-                    "address": token.get("address", ""),
-                    "qualified_at": token.get("qualified_at", ""),
+                    "symbol": _spreadsheet_safe(token.get("symbol", "")),
+                    "name": _spreadsheet_safe(token.get("name", "")),
+                    "address": _spreadsheet_safe(token.get("address", "")),
+                    "qualified_at": _spreadsheet_safe(token.get("qualified_at", "")),
                     "starting_market_cap": token.get("initial_mc", ""),
                     "current_market_cap": token.get("current_mc", ""),
                     "peak_market_cap": token.get("peak_mc", ""),
                     "current_multiple": current_multiple(token) or "",
                     "peak_multiple": peak_multiple(token) or "",
-                    "narrative_evidence": narrative,
-                    "attention_evidence": attention,
+                    "narrative_evidence": _spreadsheet_safe(narrative),
+                    "attention_evidence": _spreadsheet_safe(attention),
                 })
             handle.flush()
             os.fsync(handle.fileno())
