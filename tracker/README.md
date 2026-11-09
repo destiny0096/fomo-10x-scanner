@@ -5,8 +5,8 @@ A separate tracker component with evidence-gated qualification, SQLite persisten
 ## Public evidence adapters (v1)
 
 - DexScreener's public token endpoint resolves Solana pair metadata and discovers project websites.
-- Public website title/description metadata is captured as candidate narrative evidence. This is an initial evidence gate, not a sophisticated judgement of narrative quality.
-- Reddit public search checks recent posts. Attention requires at least two distinct matching authors and five combined post scores/comments. Posts must match by mint address or by both token name and symbol.
+- Public project-site descriptions must contain at least 8 words and 55 characters; generic placeholders and title-only snippets are rejected. This is a deterministic quality screen, not a human-level judgement of narrative quality. Project-site fetches use HTTPS only, resolve only to globally routable IP addresses, and do not follow redirects.
+- Reddit public search checks recent posts. Attention requires at least 2 distinct authors, at least 2 matching posts, and at least 5 combined post scores/comments. Duplicate post IDs are counted once. Posts must match by mint address or by both token name and symbol.
 - Requests are read-only, time-limited, and fail closed if a source is unavailable or malformed. No paid X API or private account access is used.
 
 ## Pipeline and scanner integration
