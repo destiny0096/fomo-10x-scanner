@@ -4,15 +4,19 @@ A separate tracker component with evidence-gated qualification, SQLite persisten
 
 ## Public evidence adapters (v1)
 
-- DexScreener's public token endpoint is used to resolve Solana token/pair metadata and discover project websites.
-- The adapter reads a public website's HTML title/description as possible narrative evidence. A DexScreener listing or social link alone is NOT narrative proof.
-- Reddit's public search JSON is checked for recent posts. Attention passes only when matching posts identify the token by mint address or by BOTH full name and symbol, include distinct authors, and show observable score/comment activity. Defaults are at least two distinct authors and five combined score/comments.
-- Requests are read-only, have timeouts, and fail closed when a source is blocked, missing, or malformed. No paid X API or private account access is used.
+- DexScreener's public token endpoint resolves Solana pair metadata and discovers project websites.
+- Public website title/description metadata is captured as a candidate narrative source. It is not a sophisticated narrative-quality judgement; the current v1 gate verifies that documented source evidence exists.
+- Reddit public search checks recent posts. Attention requires at least two distinct matching authors and five combined post scores/comments. Posts must match by mint address or by both token name and symbol.
+- Requests are read-only, time-limited, and fail closed if a source is unavailable or malformed. No paid X API or private account access is used.
 
-These are conservative v1 signals, not proof that every account is human or that engagement is organic. Public endpoints can rate-limit or change. The adapters return evidence; they do not yet connect to the live scanner or automatically qualify live alerts.
+## Pipeline
+
+Call `await evaluate_and_record(token, database=...)` from `tracker.pipeline`. The token must include `address` and a positive `market_cap`; `name` and `symbol` improve source matching. The pipeline collects evidence, requires BOTH narrative and attention checks, then inserts a unique record if the 100-entry cap has not been reached. It returns a status such as `qualified`, `rejected`, `duplicate`, `tracker_full`, or `evidence_error`.
+
+This pipeline is callable independently, but it is NOT connected to `bot.py` yet. Scanner integration is deliberately held for a separate review so this branch cannot alter existing alert behavior.
 
 ## Tests
 
 Run from the repository root: `python -m unittest discover -s tests -v`
 
-The SQLite database is created at runtime only; no live database is committed. The scanner and its deployment are not changed by this package.
+The SQLite database is created at runtime only; no live database is committed. The scanner and its deployment are not changed.
