@@ -172,7 +172,7 @@ async def collect_narrative_evidence(
             continue
         title = _clean(" ".join(parser.title_parts))
         description = parser.description
-        summary = description or title
+        summary = description
         if summary:
             evidence.append({
                 "source": "Public project website metadata",
