@@ -700,10 +700,14 @@ async def main():
 
 async def run():
     runner = await start_health_server()
+    try:
+        tracker_interval = int(os.getenv("TRACKER_MC_POLL_SECONDS", "300"))
+    except (TypeError, ValueError):
+        logging.warning("Invalid TRACKER_MC_POLL_SECONDS; using 300 seconds")
+        tracker_interval = 300
+
     tracker_task = asyncio.create_task(
-        market_cap_monitor(
-            interval_seconds=int(os.getenv("TRACKER_MC_POLL_SECONDS", "300"))
-        ),
+        market_cap_monitor(interval_seconds=max(60, tracker_interval)),
         name="fomo-tracker-market-cap-monitor",
     )
 
