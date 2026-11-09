@@ -6,6 +6,7 @@ on:
       - feature/fomo-tracker-test-4
     paths:
       - 'tracker/**'
+      - 'bot.py'
       - 'tests/**'
       - '.github/workflows/tracker-tests.yml'
   pull_request:
@@ -26,5 +27,7 @@ jobs:
           python-version: '3.11'
       - name: Install tracker dependency
         run: pip install 'aiohttp>=3.9,<4'
+      - name: Compile scanner and tracker modules
+        run: python -m compileall -q bot.py tracker tests
       - name: Run isolated tracker tests
         run: python -m unittest discover -s tests -v
