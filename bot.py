@@ -11,6 +11,7 @@ from security_test import check_security, security_summary
 from lp_test import check_lp_status, lp_status_text
 from sell_route_test import check_sell_route, sell_route_text
 from tracker.integration import schedule_tracking
+from tracker.market_monitor import market_cap_monitor
 
 
 # ============================================================
@@ -699,11 +700,22 @@ async def main():
 
 async def run():
     runner = await start_health_server()
+    tracker_task = asyncio.create_task(
+        market_cap_monitor(
+            interval_seconds=int(os.getenv("TRACKER_MC_POLL_SECONDS", "300"))
+        ),
+        name="fomo-tracker-market-cap-monitor",
+    )
 
     try:
         await main()
 
     finally:
+        tracker_task.cancel()
+        try:
+            await tracker_task
+        except asyncio.CancelledError:
+            pass
         await runner.cleanup()
 
 
