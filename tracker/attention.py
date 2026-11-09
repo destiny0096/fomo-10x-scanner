@@ -11,7 +11,7 @@ MIN_MATCHING_POSTS = 2
 def _metric(item: dict[str, Any], key: str) -> int:
     try:
         value = int(item.get(key, 0))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 0
     return max(0, value)
 
