@@ -12,7 +12,7 @@ class MarketCapParsingTests(unittest.TestCase):
         self.assertIsNone(_market_cap({"fdv": 900000}))
 
     def test_rejects_missing_zero_and_invalid_values(self):
-        for pair in ({}, {"marketCap": 0}, {"marketCap": "unknown"}):
+        for pair in ({}, {"marketCap": 0}, {"marketCap": "unknown"}, {"marketCap": "nan"}, {"marketCap": "inf"}):
             with self.subTest(pair=pair):
                 self.assertIsNone(_market_cap(pair))
 
