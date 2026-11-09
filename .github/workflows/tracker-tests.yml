@@ -6,12 +6,12 @@ on:
       - feature/fomo-tracker-test-4
     paths:
       - 'tracker/**'
-      - 'tests/test_tracker.py'
+      - 'tests/**'
       - '.github/workflows/tracker-tests.yml'
   pull_request:
     paths:
       - 'tracker/**'
-      - 'tests/test_tracker.py'
+      - 'tests/**'
       - '.github/workflows/tracker-tests.yml'
 
 jobs:
