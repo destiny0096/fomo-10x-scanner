@@ -7,7 +7,7 @@ import math
 def _positive_number(value) -> float | None:
     try:
         number = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     return number if math.isfinite(number) and number > 0 else None
 
