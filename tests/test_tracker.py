@@ -70,6 +70,23 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(reopened.count(),1)
             self.assertTrue(reopened.integrity_check())
 
+    def test_non_finite_market_caps_are_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = TrackerDatabase(Path(d) / "tracker.db")
+            for bad_value in (float("nan"), float("inf"), float("-inf")):
+                token = self._token()
+                token["address"] = f"Bad{str(bad_value)}"
+                token["market_cap"] = bad_value
+                self.assertEqual(db.add_qualified(token, "2026-11-09T10:00:00Z"), "invalid")
+            self.assertEqual(db.count(), 0)
+
+    def test_non_finite_market_cap_updates_are_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = TrackerDatabase(Path(d) / "tracker.db")
+            self.assertEqual(db.add_qualified(self._token(), "2026-11-09T10:00:00Z"), "added")
+            for bad_value in (float("nan"), float("inf"), float("-inf")):
+                self.assertFalse(db.record_market_cap("Mint111", bad_value, "2026-11-09T11:00:00Z"))
+
     def test_writable_data_mount_is_selected_by_default(self):
         with patch.dict(os.environ, {}, clear=True):
             with patch("tracker.database.Path.is_dir", return_value=True), patch("tracker.database.os.access", return_value=True):
