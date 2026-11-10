@@ -283,6 +283,27 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(len(events[-1]["tokens"]), 100)
             self.assertEqual(db.pending_notification_count(), 0)
 
+    def test_concurrent_qualifications_cannot_skip_the_25_token_milestone(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        with tempfile.TemporaryDirectory() as d:
+            db = TrackerDatabase(Path(d) / "tracker.db")
+            def add(index):
+                token = self._token()
+                token["address"] = f"ConcurrentMint{index}"
+                return db.add_qualified(token, f"2026-11-10T11:{index:02d}:00Z")
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                results = list(pool.map(add, range(25)))
+            self.assertEqual(results.count("added"), 25)
+            events = []
+            while True:
+                event = db.claim_next_notification()
+                if event is None:
+                    break
+                events.append(event["milestone"])
+                db.finish_notification(event["milestone"], sent=True)
+            self.assertEqual(events, [1, 25])
+
     def test_failed_milestone_notification_can_be_retried(self):
         with tempfile.TemporaryDirectory() as d:
             db = TrackerDatabase(Path(d) / "tracker.db")
