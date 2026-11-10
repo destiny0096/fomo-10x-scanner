@@ -114,6 +114,17 @@ class IntegrationBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(task.cancelled())
         self.assertNotIn(task, _background_tasks)
 
+
+    async def test_schedule_failure_is_contained_and_coroutine_is_closed(self):
+        from tracker.integration import schedule_tracking
+        with patch("tracker.integration.asyncio.create_task", side_effect=RuntimeError("loop closing")):
+            self.assertFalse(schedule_tracking({"address": "MintNoLoop"}))
+
+    async def test_tracker_database_constructor_failure_is_contained(self):
+        with patch("tracker.integration.TrackerDatabase", side_effect=OSError("disk unavailable")):
+            result = await track_alerted_token({"address": "MintDisk", "symbol": "DSK"})
+        self.assertEqual(result["status"], "tracker_error")
+
     async def test_tracker_exception_is_contained(self):
         with patch("tracker.integration.evaluate_and_record", new=AsyncMock(side_effect=RuntimeError("db down"))):
             result = await track_alerted_token({"address": "MintBridge", "symbol": "BRG"})
