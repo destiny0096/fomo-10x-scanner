@@ -7,7 +7,7 @@ from tracker.integration import drain_tracking_tasks, track_alerted_token, _back
 class IntegrationBridgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_successful_tracker_result_is_returned(self):
         expected = {"status": "qualified", "reason": "both checks passed"}
-        with patch("tracker.integration.evaluate_and_record", new=AsyncMock(return_value=expected)):
+        with patch("tracker.integration.deliver_pending_notifications", new=AsyncMock(return_value=0)), patch("tracker.integration.evaluate_and_record", new=AsyncMock(return_value=expected)):
             result = await track_alerted_token({"address": "MintBridge", "symbol": "BRG"})
         self.assertEqual(result, expected)
 
@@ -27,13 +27,13 @@ class IntegrationBridgeTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("tracker.integration.TrackerDatabase", return_value=FakeDatabase()), \
              patch("tracker.integration.evaluate_and_record", new=AsyncMock(return_value={"status": "qualified"})), \
-             patch("tracker.integration.send_progress_notification", new=AsyncMock(side_effect=RuntimeError("Telegram offline"))) as send_text, \
+             patch("tracker.integration.deliver_pending_notifications", new=AsyncMock(return_value=0)) as deliver, \
              patch("tracker.integration.export_results", return_value=Path("/tmp/results.csv")) as export, \
              patch("tracker.integration.send_completion_export", new=AsyncMock(return_value=True)) as send_csv:
             result = await track_alerted_token({"address": "Mint99", "symbol": "T99"})
 
         self.assertEqual(result["status"], "qualified")
-        send_text.assert_awaited_once()
+        deliver.assert_awaited_once_with(unittest.mock.ANY)
         export.assert_called_once()
         send_csv.assert_awaited_once_with(Path("/tmp/results.csv"))
 
@@ -50,7 +50,7 @@ class IntegrationBridgeTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict("os.environ", {"TRACKER_EXPORT_PATH": "/tmp/tracker_results.csv"}), \
              patch("tracker.integration.TrackerDatabase", return_value=FakeDatabase()), \
              patch("tracker.integration.evaluate_and_record", new=AsyncMock(return_value={"status": "qualified"})), \
-             patch("tracker.integration.send_progress_notification", new=AsyncMock(return_value=True)), \
+             patch("tracker.integration.deliver_pending_notifications", new=AsyncMock(return_value=1)), \
              patch("tracker.integration.export_results") as export, \
              patch("tracker.integration.send_completion_export", new=AsyncMock(return_value=True)) as send_csv:
             result = await track_alerted_token({"address": "Mint100", "symbol": "T100"})
