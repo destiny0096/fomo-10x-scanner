@@ -170,6 +170,19 @@ class IntegrationBridgeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(db.pending_candidate_count(), 1)
             self.assertEqual(db.claim_next_candidate()["address"], "CancelQueueMint")
 
+
+    async def test_startup_resume_wakes_worker_for_pending_candidates(self):
+        import tempfile
+        from pathlib import Path
+        from tracker.database import TrackerDatabase
+        from tracker.integration import resume_pending_tracking
+        with tempfile.TemporaryDirectory() as d:
+            db = TrackerDatabase(Path(d) / "tracker.db")
+            db.enqueue_candidate({"address": "ResumeMint", "market_cap": 100})
+            with patch("tracker.integration.TrackerDatabase", return_value=db), patch("tracker.integration._start_candidate_worker", return_value=True) as start:
+                self.assertTrue(resume_pending_tracking())
+            start.assert_called_once()
+
     async def test_schedule_persists_before_waking_worker(self):
         import tempfile
         from pathlib import Path
