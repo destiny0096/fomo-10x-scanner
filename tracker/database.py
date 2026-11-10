@@ -4,6 +4,7 @@ import math
 import os
 import sqlite3
 import tempfile
+from datetime import datetime, timedelta, timezone
 from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any
@@ -52,6 +53,11 @@ class TrackerDatabase:
                 symbol TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '',
                 initial_mc REAL NOT NULL, peak_mc REAL NOT NULL, current_mc REAL NOT NULL,
                 qualified_at TEXT NOT NULL, evidence_json TEXT NOT NULL)""")
+            db.execute("""CREATE TABLE IF NOT EXISTS notification_outbox (
+                milestone INTEGER PRIMARY KEY, payload_json TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+                claimed_at TEXT, sent_at TEXT)
+            """)
             db.execute("""CREATE TABLE IF NOT EXISTS mc_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, address TEXT NOT NULL,
                 market_cap REAL NOT NULL, observed_at TEXT NOT NULL)""")
@@ -121,7 +127,59 @@ class TrackerDatabase:
                 "INSERT INTO mc_snapshots(address,market_cap,observed_at) VALUES (?,?,?)",
                 (address, mc, qualified_at),
             )
+            # Queue milestone messages in the SAME transaction as the token insert.
+            # This prevents concurrent qualifying tasks from skipping a boundary.
+            count = int(db.execute("SELECT COUNT(*) FROM tracked_tokens").fetchone()[0])
+            if count in {1, 25, 50, 75, 100}:
+                rows = db.execute("SELECT * FROM tracked_tokens ORDER BY id").fetchall()
+                payload = json.dumps([dict(row) for row in rows], sort_keys=True)
+                db.execute(
+                    "INSERT OR IGNORE INTO notification_outbox(milestone,payload_json) VALUES (?,?)",
+                    (count, payload),
+                )
         return "added"
+
+    def claim_next_notification(self) -> dict[str, Any] | None:
+        """Claim one pending event; abandoned claims become retryable after five minutes."""
+        now = datetime.now(timezone.utc)
+        stale = (now - timedelta(minutes=5)).isoformat()
+        claimed = now.isoformat()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                """SELECT milestone,payload_json FROM notification_outbox
+                WHERE status='pending' OR (status='sending' AND claimed_at < ?)
+                ORDER BY milestone LIMIT 1""",
+                (stale,),
+            ).fetchone()
+            if row is None:
+                return None
+            db.execute(
+                """UPDATE notification_outbox SET status='sending', claimed_at=?, attempts=attempts+1
+                WHERE milestone=?""",
+                (claimed, row["milestone"]),
+            )
+            return {"milestone": int(row["milestone"]), "tokens": json.loads(row["payload_json"])}
+
+    def finish_notification(self, milestone: int, *, sent: bool) -> None:
+        """Mark delivery complete or release the event for a later retry."""
+        with self._connect() as db:
+            if sent:
+                db.execute(
+                    "UPDATE notification_outbox SET status='sent', sent_at=?, claimed_at=NULL WHERE milestone=?",
+                    (datetime.now(timezone.utc).isoformat(), milestone),
+                )
+            else:
+                db.execute(
+                    "UPDATE notification_outbox SET status='pending', claimed_at=NULL WHERE milestone=?",
+                    (milestone,),
+                )
+
+    def pending_notification_count(self) -> int:
+        with self._connect() as db:
+            return int(db.execute(
+                "SELECT COUNT(*) FROM notification_outbox WHERE status!='sent'"
+            ).fetchone()[0])
 
     def record_market_cap(self, address: str, market_cap: float, observed_at: str) -> bool:
         try:
