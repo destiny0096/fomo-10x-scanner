@@ -221,3 +221,51 @@ class IntegrationBridgeTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CandidateRecoveryJourneyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_deferred_candidate_succeeds_on_later_worker_attempt(self):
+        import tempfile
+        from pathlib import Path
+        from tracker.database import TrackerDatabase
+
+        with tempfile.TemporaryDirectory() as directory:
+            db = TrackerDatabase(Path(directory) / "tracker.db")
+            db.enqueue_candidate({"address": "RetryThenPass", "symbol": "RTP", "market_cap": 12000})
+            outcomes = [
+                {"status": "evidence_error", "reason": "public source temporarily unavailable"},
+                {"status": "rejected", "reason": "evidence did not pass both gates"},
+            ]
+            async def next_outcome(_token):
+                return outcomes.pop(0)
+
+            with patch("tracker.integration.TrackerDatabase", return_value=db), \
+                 patch("tracker.integration.track_alerted_token", side_effect=next_outcome) as track:
+                self.assertEqual(await process_pending_candidates(), 0)
+                self.assertEqual(db.pending_candidate_count(), 1)
+                self.assertEqual(await process_pending_candidates(), 1)
+
+            self.assertEqual(track.await_count, 2)
+            self.assertEqual(db.pending_candidate_count(), 0)
+
+    async def test_startup_resume_processes_candidate_from_reopened_database(self):
+        import tempfile
+        from pathlib import Path
+        from tracker.database import TrackerDatabase
+        from tracker.integration import resume_pending_tracking
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "tracker.db"
+            first_process_db = TrackerDatabase(path)
+            first_process_db.enqueue_candidate({
+                "address": "RestartJourney", "symbol": "RST", "market_cap": 15000
+            })
+            # Reopen the same SQLite file as a fresh application process would.
+            restarted_process_db = TrackerDatabase(path)
+            with patch("tracker.integration.TrackerDatabase", return_value=restarted_process_db), \
+                 patch("tracker.integration.track_alerted_token", new=AsyncMock(return_value={"status": "rejected"})) as track:
+                self.assertTrue(resume_pending_tracking())
+                await drain_tracking_tasks(timeout_seconds=2)
+
+            track.assert_awaited_once()
+            self.assertEqual(restarted_process_db.pending_candidate_count(), 0)
