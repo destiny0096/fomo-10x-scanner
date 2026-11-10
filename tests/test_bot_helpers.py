@@ -34,3 +34,35 @@ class BestSolanaPairsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ScannerTrackerIsolationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_tracker_schedule_failure_does_not_undo_successful_scanner_alert(self):
+        pair = {
+            "chainId": "solana",
+            "baseToken": {"address": "MintTrackerDown", "name": "Example", "symbol": "EX"},
+            "marketCap": 50000,
+            "liquidity": {"usd": 10000},
+            "volume": {"h24": 10000, "m5": 5000},
+            "txns": {"h24": {"buys": 30, "sells": 10}, "m5": {"buys": 8, "sells": 2}},
+            "priceChange": {"m5": 15},
+            "url": "https://dexscreener.com/solana/MintTrackerDown",
+        }
+        address = "MintTrackerDown"
+        bot.alerted.discard(address)
+        bot.candidates[address] = 1
+
+        with patch.object(bot, "check_security", new=AsyncMock(return_value={})), \
+             patch.object(bot, "check_lp_status", new=AsyncMock(return_value="BURNED")), \
+             patch.object(bot, "check_sell_route", new=AsyncMock(return_value="OK")), \
+             patch.object(bot, "security_summary", return_value="Security checked"), \
+             patch.object(bot, "lp_status_text", return_value="LP checked"), \
+             patch.object(bot, "sell_route_text", return_value="Sell route checked"), \
+             patch.object(bot, "tg", new=AsyncMock(return_value=None)) as telegram, \
+             patch.object(bot, "schedule_tracking", side_effect=RuntimeError("tracker unavailable")):
+            sent = await bot.evaluate_pair(object(), pair)
+
+        self.assertTrue(sent)
+        telegram.assert_awaited_once()
+        self.assertIn(address, bot.alerted)
+        self.assertNotIn(address, bot.candidates)
