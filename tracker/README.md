@@ -36,8 +36,10 @@ The runtime database uses `/data/tracker_data.db` automatically only when `/data
 
 Do not use an ephemeral GitHub Actions runner as the long-term live tracker host. Before deployment, verify the persistent-volume mount and write permissions. A backup stored elsewhere on the same volume is useful for accidental file-level recovery but is not an independent disaster-recovery backup; periodically copy backups outside the app volume.
 
-## Tests
+## Tests and deployment preflight
 
-Run from the repository root: `python -m unittest discover -s tests -v`
+Run from the repository root: `python -m unittest discover -s tests -v`.
+
+After configuring real hosting secrets and persistent mounts, run `python -m tracker.preflight` inside the deployment container. It checks explicit storage paths, separate backup filesystem, SQLite integrity/backup write, Telegram read-only authentication/chat access, DexScreener, and Reddit. It sends no Telegram messages and never prints credentials. Any failed check blocks go-live. See the repository `DEPLOYMENT.md` for provider setup and rollback steps.
 
 The tracker is developed on `feature/fomo-tracker-test-4`. Merge to `main` and deploy only after explicit approval.
