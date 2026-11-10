@@ -702,35 +702,35 @@ async def main():
 async def run():
     runner = await start_health_server()
     try:
-        # Retry any durable milestone notifications left pending by a previous
-        # shutdown or Telegram outage. A notification failure must not stop scanning.
+        # Retry durable milestone notifications left pending by a previous
+        # shutdown or Telegram outage. Delivery failure must not stop scanning.
         try:
             await deliver_pending_notifications()
         except Exception:
             logging.exception("Could not drain pending tracker notifications at startup")
-    try:
-        tracker_interval = int(os.getenv("TRACKER_MC_POLL_SECONDS", "300"))
-    except (TypeError, ValueError):
-        logging.warning("Invalid TRACKER_MC_POLL_SECONDS; using 300 seconds")
-        tracker_interval = 300
 
-    tracker_task = asyncio.create_task(
-        market_cap_monitor(interval_seconds=max(60, tracker_interval)),
-        name="fomo-tracker-market-cap-monitor",
-    )
-
-    try:
-        await main()
-
-    finally:
-        tracker_task.cancel()
         try:
-            await tracker_task
-        except asyncio.CancelledError:
-            pass
-        await drain_tracking_tasks(timeout_seconds=20)
-        await runner.cleanup()
+            tracker_interval = int(os.getenv("TRACKER_MC_POLL_SECONDS", "300"))
+        except (TypeError, ValueError):
+            logging.warning("Invalid TRACKER_MC_POLL_SECONDS; using 300 seconds")
+            tracker_interval = 300
 
+        tracker_task = asyncio.create_task(
+            market_cap_monitor(interval_seconds=max(60, tracker_interval)),
+            name="fomo-tracker-market-cap-monitor",
+        )
+
+        try:
+            await main()
+        finally:
+            tracker_task.cancel()
+            try:
+                await tracker_task
+            except asyncio.CancelledError:
+                pass
+            await drain_tracking_tasks(timeout_seconds=20)
+    finally:
+        await runner.cleanup()
 
 if __name__ == "__main__":
     asyncio.run(run())
