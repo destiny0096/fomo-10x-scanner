@@ -265,6 +265,47 @@ class PersistenceTests(unittest.TestCase):
             restored = restore_backup(backup, target)
             self.assertEqual(TrackerDatabase(restored).count(), 1)
 
+    def test_milestone_outbox_is_transactional_and_covers_all_boundaries(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = TrackerDatabase(Path(d) / "tracker.db")
+            for index in range(100):
+                token = self._token()
+                token["address"] = f"OutboxMint{index}"
+                self.assertEqual(db.add_qualified(token, f"2026-11-10T10:{index:02d}:00Z"), "added")
+            events = []
+            while True:
+                event = db.claim_next_notification()
+                if event is None:
+                    break
+                events.append(event)
+                db.finish_notification(event["milestone"], sent=True)
+            self.assertEqual([event["milestone"] for event in events], [1, 25, 50, 75, 100])
+            self.assertEqual(len(events[-1]["tokens"]), 100)
+            self.assertEqual(db.pending_notification_count(), 0)
+
+    def test_failed_milestone_notification_can_be_retried(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = TrackerDatabase(Path(d) / "tracker.db")
+            db.add_qualified(self._token(), "2026-11-10T10:00:00Z")
+            first = db.claim_next_notification()
+            self.assertEqual(first["milestone"], 1)
+            db.finish_notification(1, sent=False)
+            self.assertEqual(db.pending_notification_count(), 1)
+            retry = db.claim_next_notification()
+            self.assertEqual(retry["milestone"], 1)
+            db.finish_notification(1, sent=True)
+            self.assertEqual(db.pending_notification_count(), 0)
+
+    def test_milestone_outbox_is_included_in_sqlite_backup(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = TrackerDatabase(Path(d) / "tracker.db")
+            db.add_qualified(self._token(), "2026-11-10T10:00:00Z")
+            backup = db.backup_to(Path(d) / "backup.db")
+            restored = TrackerDatabase(backup)
+            event = restored.claim_next_notification()
+            self.assertEqual(event["milestone"], 1)
+            self.assertEqual(len(event["tokens"]), 1)
+
     def test_hard_cap_is_exactly_100_qualified_tokens(self):
         with tempfile.TemporaryDirectory() as d:
             db = TrackerDatabase(Path(d) / "tracker.db")
