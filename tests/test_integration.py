@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from tracker.integration import drain_tracking_tasks, track_alerted_token, _background_tasks
+from tracker.integration import (drain_tracking_tasks, track_alerted_token, process_pending_candidates, schedule_tracking, _background_tasks)
 
 
 class IntegrationBridgeTests(unittest.IsolatedAsyncioTestCase):
@@ -121,9 +121,53 @@ class IntegrationBridgeTests(unittest.IsolatedAsyncioTestCase):
                 await track_alerted_token({"address": "MintCancelled", "symbol": "CXL"})
         cancelled.assert_awaited_once()
 
+
+    async def test_durable_worker_completes_queued_candidate(self):
+        import tempfile
+        from pathlib import Path
+        from tracker.database import TrackerDatabase
+        with tempfile.TemporaryDirectory() as d:
+            db = TrackerDatabase(Path(d) / "tracker.db")
+            db.enqueue_candidate({"address": "WorkerMint", "symbol": "WRK", "market_cap": 100})
+            with patch("tracker.integration.TrackerDatabase", return_value=db), patch("tracker.integration.track_alerted_token", new=AsyncMock(return_value={"status": "rejected"})) as track:
+                processed = await process_pending_candidates()
+            self.assertEqual(processed, 1)
+            track.assert_awaited_once()
+            self.assertEqual(db.pending_candidate_count(), 0)
+
+    async def test_transient_worker_failure_requeues_candidate(self):
+        import tempfile
+        from pathlib import Path
+        from tracker.database import TrackerDatabase
+        with tempfile.TemporaryDirectory() as d:
+            db = TrackerDatabase(Path(d) / "tracker.db")
+            db.enqueue_candidate({"address": "RetryMint", "market_cap": 100})
+            with patch("tracker.integration.TrackerDatabase", return_value=db), patch("tracker.integration.track_alerted_token", new=AsyncMock(return_value={"status": "evidence_error", "reason": "source offline"})):
+                processed = await process_pending_candidates()
+            self.assertEqual(processed, 0)
+            self.assertEqual(db.pending_candidate_count(), 1)
+            self.assertEqual(db.claim_next_candidate()["address"], "RetryMint")
+
+    async def test_schedule_persists_before_waking_worker(self):
+        import tempfile
+        from pathlib import Path
+        from tracker.database import TrackerDatabase
+        with tempfile.TemporaryDirectory() as d:
+            db = TrackerDatabase(Path(d) / "tracker.db")
+            with patch("tracker.integration.TrackerDatabase", return_value=db), patch("tracker.integration._start_candidate_worker", return_value=True) as start:
+                self.assertTrue(schedule_tracking({"address": "ScheduledMint", "symbol": "SCH", "market_cap": 100}))
+            self.assertEqual(db.pending_candidate_count(), 1)
+            start.assert_called_once()
+
+    async def test_queue_database_failure_uses_volatile_fallback(self):
+        with patch("tracker.integration.TrackerDatabase", side_effect=OSError("disk offline")), patch("tracker.integration.asyncio.create_task") as create_task:
+            create_task.return_value = unittest.mock.Mock()
+            self.assertTrue(schedule_tracking({"address": "FallbackMint"}))
+            create_task.assert_called_once()
+
     async def test_schedule_failure_is_contained_and_coroutine_is_closed(self):
         from tracker.integration import schedule_tracking
-        with patch("tracker.integration.asyncio.create_task", side_effect=RuntimeError("loop closing")):
+        with patch("tracker.integration.TrackerDatabase", side_effect=OSError("disk offline")), patch("tracker.integration.asyncio.create_task", side_effect=RuntimeError("loop closing")):
             self.assertFalse(schedule_tracking({"address": "MintNoLoop"}))
 
     async def test_tracker_database_constructor_failure_is_contained(self):
