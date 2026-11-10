@@ -367,6 +367,16 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(db.enqueue_candidate(token), "duplicate")
             self.assertEqual(db.pending_candidate_count(), 1)
 
+
+    def test_candidate_queue_is_included_in_sqlite_backup(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = TrackerDatabase(Path(d) / "tracker.db")
+            db.enqueue_candidate({"address": "BackupQueueMint", "market_cap": 100})
+            backup = db.backup_to(Path(d) / "backup.db")
+            restored = TrackerDatabase(backup)
+            self.assertEqual(restored.pending_candidate_count(), 1)
+            self.assertEqual(restored.claim_next_candidate()["address"], "BackupQueueMint")
+
     def test_candidate_queue_claim_and_complete_are_durable(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "tracker.db"
