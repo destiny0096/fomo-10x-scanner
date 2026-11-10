@@ -148,6 +148,28 @@ class IntegrationBridgeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(db.pending_candidate_count(), 1)
             self.assertEqual(db.claim_next_candidate()["address"], "RetryMint")
 
+
+    async def test_worker_releases_claim_when_shutdown_cancels_evaluation(self):
+        import asyncio
+        import tempfile
+        from pathlib import Path
+        from tracker.database import TrackerDatabase
+        with tempfile.TemporaryDirectory() as d:
+            db = TrackerDatabase(Path(d) / "tracker.db")
+            db.enqueue_candidate({"address": "CancelQueueMint", "market_cap": 100})
+            started = asyncio.Event()
+            async def blocked(_token):
+                started.set()
+                await asyncio.Event().wait()
+            with patch("tracker.integration.TrackerDatabase", return_value=db), patch("tracker.integration.track_alerted_token", side_effect=blocked):
+                worker = asyncio.create_task(process_pending_candidates())
+                await started.wait()
+                worker.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await worker
+            self.assertEqual(db.pending_candidate_count(), 1)
+            self.assertEqual(db.claim_next_candidate()["address"], "CancelQueueMint")
+
     async def test_schedule_persists_before_waking_worker(self):
         import tempfile
         from pathlib import Path
