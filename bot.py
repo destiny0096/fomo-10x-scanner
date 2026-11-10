@@ -702,6 +702,13 @@ async def main():
 async def run():
     runner = await start_health_server()
     try:
+        # Retry any durable milestone notifications left pending by a previous
+        # shutdown or Telegram outage. A notification failure must not stop scanning.
+        try:
+            await deliver_pending_notifications()
+        except Exception:
+            logging.exception("Could not drain pending tracker notifications at startup")
+    try:
         tracker_interval = int(os.getenv("TRACKER_MC_POLL_SECONDS", "300"))
     except (TypeError, ValueError):
         logging.warning("Invalid TRACKER_MC_POLL_SECONDS; using 300 seconds")
