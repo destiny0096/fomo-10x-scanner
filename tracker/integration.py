@@ -1,4 +1,4 @@
-"""Non-blocking, failure-isolated bridge from scanner alerts to Tracker Test 4."""
+"""Failure-isolated bridge from scanner alerts to the durable tracker queue."""
 from __future__ import annotations
 
 import asyncio
@@ -14,6 +14,7 @@ from .pipeline import evaluate_and_record
 
 logger = logging.getLogger(__name__)
 _notification_delivery_lock = asyncio.Lock()
+_candidate_worker_lock = asyncio.Lock()
 _background_tasks: set[asyncio.Task] = set()
 
 
@@ -45,35 +46,23 @@ async def track_alerted_token(token: dict[str, Any]) -> dict[str, Any]:
     try:
         database = TrackerDatabase()
         result = await evaluate_and_record(token, database=database)
-        logger.info(
-            "TRACKER %s %s: %s",
-            token.get("symbol") or "",
-            token.get("address") or "",
-            result.get("status", "unknown"),
-        )
+        logger.info("TRACKER %s %s: %s", token.get("symbol") or "",
+                    token.get("address") or "", result.get("status", "unknown"))
         if result.get("status") in {"rejected", "evidence_error"}:
             logger.info("TRACKER detail for %s: %s", token.get("address"), result.get("reason", ""))
 
-        # Milestones are written transactionally with each new token. Drain the
-        # durable outbox so concurrent inserts cannot skip a boundary and failed
-        # Telegram sends can be retried on the next token or process startup.
         if result.get("status") == "qualified":
             await deliver_pending_notifications(database)
-            count = database.count()
-            if count == 100:
+            if database.count() == 100:
                 configured_export = os.getenv("TRACKER_EXPORT_PATH", "").strip()
-                export_path = (
-                    Path(configured_export).expanduser()
-                    if configured_export
-                    else database.path.parent / "tracker_results.csv"
-                )
+                export_path = (Path(configured_export).expanduser() if configured_export
+                               else database.path.parent / "tracker_results.csv")
                 try:
                     if export_path.resolve() == database.path.resolve():
                         raise ValueError("Tracker results export cannot overwrite the live database")
                     completed_csv = export_results(database.list_tokens(), export_path)
                     await send_completion_export(completed_csv)
                 except Exception:
-                    # Export/Telegram delivery must never interrupt scanner operation.
                     logger.exception("Could not export or deliver completed Tracker Test 4 cohort")
         return result
     except Exception:
@@ -81,20 +70,39 @@ async def track_alerted_token(token: dict[str, Any]) -> dict[str, Any]:
         return {"status": "tracker_error"}
 
 
-def schedule_tracking(token: dict[str, Any]) -> bool:
-    """Schedule background tracking without allowing tracker failures to escape."""
-    coroutine = None
-    try:
-        coroutine = track_alerted_token(dict(token))
-        task = asyncio.create_task(coroutine)
-    except Exception:
-        # If task creation fails, close the coroutine to avoid an
-        # "unawaited coroutine" warning during scanner operation.
-        if coroutine is not None:
-            coroutine.close()
-        logger.exception("Could not schedule tracker task")
-        return False
+async def process_pending_candidates() -> int:
+    """Drain durable scanner-alert work; interrupted claims are recoverable."""
+    processed = 0
+    async with _candidate_worker_lock:
+        database = TrackerDatabase(timeout_seconds=1.0)
+        while True:
+            candidate = database.claim_next_candidate()
+            if candidate is None:
+                break
+            address = candidate["address"]
+            try:
+                result = await track_alerted_token(candidate)
+            except asyncio.CancelledError:
+                try:
+                    database.retry_candidate(address, "worker cancelled during evaluation")
+                except Exception:
+                    logger.exception("Could not release cancelled tracker candidate %s", address)
+                raise
 
+            status = result.get("status")
+            if status in {"tracker_error", "evidence_error"}:
+                # A source/database outage is transient. Leave it queued for the
+                # next worker start rather than hot-looping on the same candidate.
+                database.retry_candidate(address, result.get("reason", status))
+                logger.warning("Tracker candidate %s deferred for retry: %s", address, status)
+                break
+
+            database.complete_candidate(address)
+            processed += 1
+    return processed
+
+
+def _register_task(task: asyncio.Task) -> None:
     _background_tasks.add(task)
 
     def _task_finished(completed: asyncio.Task) -> None:
@@ -106,13 +114,57 @@ def schedule_tracking(token: dict[str, Any]) -> bool:
         except asyncio.CancelledError:
             return
         if error is not None:
-            logger.error(
-                "Unexpected uncaught tracker task error",
-                exc_info=(type(error), error, error.__traceback__),
-            )
+            logger.error("Unexpected uncaught tracker task error",
+                         exc_info=(type(error), error, error.__traceback__))
 
     task.add_done_callback(_task_finished)
+
+
+def _start_candidate_worker() -> bool:
+    try:
+        task = asyncio.create_task(process_pending_candidates(), name="fomo-tracker-candidate-queue")
+    except Exception:
+        logger.exception("Could not start durable tracker candidate worker")
+        return False
+    _register_task(task)
     return True
+
+
+def resume_pending_tracking() -> bool:
+    """Start processing candidates left pending by a previous process."""
+    try:
+        database = TrackerDatabase(timeout_seconds=1.0)
+        if database.pending_candidate_count() == 0:
+            return True
+        return _start_candidate_worker()
+    except Exception:
+        logger.exception("Could not inspect durable tracker candidate queue at startup")
+        return False
+
+
+def schedule_tracking(token: dict[str, Any]) -> bool:
+    """Persist first, then wake the worker; scanner alerts remain failure-isolated."""
+    try:
+        database = TrackerDatabase(timeout_seconds=0.5)
+        queued = database.enqueue_candidate(dict(token))
+        if queued == "invalid":
+            logger.warning("Tracker candidate has no address; not queued")
+            return False
+        if queued == "duplicate":
+            logger.info("Tracker candidate %s already exists in durable queue", token.get("address"))
+        return _start_candidate_worker()
+    except Exception:
+        # The scanner alert has already been sent. A queue/database outage must
+        # never undo it; attempt a best-effort in-memory evaluation as fallback.
+        logger.exception("Could not persist tracker candidate %s; using volatile fallback",
+                         token.get("address"))
+        try:
+            task = asyncio.create_task(track_alerted_token(dict(token)))
+        except Exception:
+            logger.exception("Could not schedule volatile tracker fallback")
+            return False
+        _register_task(task)
+        return True
 
 
 async def drain_tracking_tasks(timeout_seconds: float = 20.0) -> None:
@@ -120,7 +172,7 @@ async def drain_tracking_tasks(timeout_seconds: float = 20.0) -> None:
     tasks = {task for task in _background_tasks if not task.done()}
     if not tasks:
         return
-    done, pending = await asyncio.wait(tasks, timeout=max(0.0, timeout_seconds))
+    _, pending = await asyncio.wait(tasks, timeout=max(0.0, timeout_seconds))
     for task in pending:
         logger.warning("Cancelling unfinished tracker task during shutdown")
         task.cancel()
