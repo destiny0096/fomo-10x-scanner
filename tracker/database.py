@@ -228,7 +228,8 @@ class TrackerDatabase:
     def retry_candidate(self, address: str, error: str = "") -> None:
         with self._connect() as db:
             db.execute("""UPDATE candidate_queue SET status='pending', claimed_at=NULL,
-                last_error=? WHERE address=?""", (str(error)[:300], address))
+                last_error=?, created_at=? WHERE address=?""",
+                (str(error)[:300], datetime.now(timezone.utc).isoformat(), address))
 
     def pending_candidate_count(self) -> int:
         with self._connect() as db:
