@@ -13,7 +13,31 @@ from .export import export_results
 from .pipeline import evaluate_and_record
 
 logger = logging.getLogger(__name__)
+_notification_delivery_lock = asyncio.Lock()
 _background_tasks: set[asyncio.Task] = set()
+
+
+async def deliver_pending_notifications(database: TrackerDatabase | None = None) -> int:
+    """Deliver durable milestone events in order; failed sends remain queued for retry."""
+    db = database or TrackerDatabase()
+    delivered = 0
+    async with _notification_delivery_lock:
+        while True:
+            event = db.claim_next_notification()
+            if event is None:
+                break
+            milestone = event["milestone"]
+            try:
+                message = progress_message(milestone, event["tokens"])
+                sent = bool(message) and await send_progress_notification(message)
+            except Exception:
+                logger.exception("Tracker milestone %s notification failed", milestone)
+                sent = False
+            db.finish_notification(milestone, sent=sent)
+            if not sent:
+                break
+            delivered += 1
+    return delivered
 
 
 async def track_alerted_token(token: dict[str, Any]) -> dict[str, Any]:
@@ -30,16 +54,12 @@ async def track_alerted_token(token: dict[str, Any]) -> dict[str, Any]:
         if result.get("status") in {"rejected", "evidence_error"}:
             logger.info("TRACKER detail for %s: %s", token.get("address"), result.get("reason", ""))
 
-        # Only newly inserted records can trigger progress notifications.
+        # Milestones are written transactionally with each new token. Drain the
+        # durable outbox so concurrent inserts cannot skip a boundary and failed
+        # Telegram sends can be retried on the next token or process startup.
         if result.get("status") == "qualified":
+            await deliver_pending_notifications(database)
             count = database.count()
-            try:
-                message = progress_message(count, database.list_tokens())
-                if message:
-                    await send_progress_notification(message)
-            except Exception:
-                # Report formatting or Telegram errors must not suppress the final CSV attempt.
-                logger.exception("Tracker progress notification failed unexpectedly")
             if count == 100:
                 configured_export = os.getenv("TRACKER_EXPORT_PATH", "").strip()
                 export_path = (
