@@ -11,7 +11,7 @@ from aiohttp import web
 from security_test import check_security, security_summary
 from lp_test import check_lp_status, lp_status_text
 from sell_route_test import check_sell_route, sell_route_text
-from tracker.integration import drain_tracking_tasks, schedule_tracking
+from tracker.integration import deliver_pending_notifications, drain_tracking_tasks, schedule_tracking
 from tracker.market_monitor import market_cap_monitor
 
 
