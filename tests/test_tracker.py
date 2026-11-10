@@ -244,6 +244,27 @@ class PersistenceTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "sidecar files"):
                 restore_backup(backup, live, force=True)
 
+    def test_restore_refuses_sidecars_even_when_database_file_is_missing(self):
+        with tempfile.TemporaryDirectory() as d:
+            live = Path(d) / "missing-live.db"
+            backup = Path(d) / "backup.db"
+            TrackerDatabase(backup)
+            Path(str(live) + "-wal").write_bytes(b"stale wal")
+            with self.assertRaisesRegex(RuntimeError, "sidecar files"):
+                restore_backup(backup, live)
+            self.assertFalse(live.exists())
+
+    def test_restore_supports_backup_paths_with_uri_special_characters(self):
+        with tempfile.TemporaryDirectory() as d:
+            folder = Path(d) / "backup folder #1"
+            folder.mkdir()
+            backup = folder / "tracker backup.db"
+            target = Path(d) / "restored.db"
+            source = TrackerDatabase(backup)
+            source.add_qualified(self._token(), "2026-11-09T10:00:00Z")
+            restored = restore_backup(backup, target)
+            self.assertEqual(TrackerDatabase(restored).count(), 1)
+
     def test_hard_cap_is_exactly_100_qualified_tokens(self):
         with tempfile.TemporaryDirectory() as d:
             db = TrackerDatabase(Path(d) / "tracker.db")
