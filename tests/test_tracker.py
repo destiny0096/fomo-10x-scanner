@@ -346,6 +346,59 @@ class PersistenceTests(unittest.TestCase):
                 db.backup_to(db.path)
 
 
+    def test_candidate_queue_persists_and_reopens_after_restart(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "tracker.db"
+            db = TrackerDatabase(path)
+            token = {"address": "QueuedMint", "name": "Queued", "symbol": "Q",
+                     "market_cap": 12345}
+            self.assertEqual(db.enqueue_candidate(token), "queued")
+            reopened = TrackerDatabase(path)
+            self.assertEqual(reopened.pending_candidate_count(), 1)
+            self.assertEqual(reopened.claim_next_candidate(), token)
+            reopened.retry_candidate("QueuedMint", "simulated interruption")
+            self.assertEqual(TrackerDatabase(path).pending_candidate_count(), 1)
+
+    def test_candidate_queue_deduplicates_addresses(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = TrackerDatabase(Path(d) / "tracker.db")
+            token = {"address": "QueueDuplicate", "market_cap": 100}
+            self.assertEqual(db.enqueue_candidate(token), "queued")
+            self.assertEqual(db.enqueue_candidate(token), "duplicate")
+            self.assertEqual(db.pending_candidate_count(), 1)
+
+    def test_candidate_queue_claim_and_complete_are_durable(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "tracker.db"
+            db = TrackerDatabase(path)
+            db.enqueue_candidate({"address": "QueueDone", "market_cap": 100})
+            self.assertEqual(db.claim_next_candidate()["address"], "QueueDone")
+            db.complete_candidate("QueueDone")
+            reopened = TrackerDatabase(path)
+            self.assertEqual(reopened.pending_candidate_count(), 0)
+            self.assertIsNone(reopened.claim_next_candidate())
+
+    def test_candidate_queue_reclaims_expired_processing_lease(self):
+        from datetime import datetime, timedelta, timezone
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "tracker.db"
+            db = TrackerDatabase(path)
+            db.enqueue_candidate({"address": "QueueLease", "market_cap": 100})
+            db.claim_next_candidate()
+            with db._connect() as connection:
+                expired = (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat()
+                connection.execute("UPDATE candidate_queue SET claimed_at=? WHERE address=?",
+                                   (expired, "QueueLease"))
+            self.assertEqual(db.claim_next_candidate()["address"], "QueueLease")
+
+    def test_candidate_queue_rejects_non_finite_json_market_cap(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = TrackerDatabase(Path(d) / "tracker.db")
+            with self.assertRaises(ValueError):
+                db.enqueue_candidate({"address": "BadQueue", "market_cap": float("nan")})
+            self.assertEqual(db.pending_candidate_count(), 0)
+
+
 class ReportTests(unittest.TestCase):
     def test_performance_report(self):
         rows = [{"symbol":"A","address":"MintA","initial_mc":100,"peak_mc":1200}]
