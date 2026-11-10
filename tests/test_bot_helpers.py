@@ -1,7 +1,7 @@
 """Focused tests for scanner-side DexScreener response handling."""
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 # bot.py reads Telegram configuration during import. Supply harmless placeholders;
 # these tests never make Telegram or network requests.
