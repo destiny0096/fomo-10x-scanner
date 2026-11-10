@@ -82,17 +82,11 @@ async def update_once(database: TrackerDatabase, session: aiohttp.ClientSession)
 
 
 async def market_cap_monitor(database: TrackerDatabase | None = None, interval_seconds: int = 300) -> None:
-    """Keep updating the 100-token cohort; never stop just because it is full.
+    """Periodically update tracker MC while keeping all failures away from scanner.
 
-    Initialization and polling failures are contained so the optional tracker
-    monitor can never prevent the primary scanner from running.
+    A database that is unavailable at startup is retried on the next cycle rather
+    than permanently disabling monitoring for the lifetime of the scanner.
     """
-    try:
-        database = database or TrackerDatabase()
-    except Exception:
-        log.exception("Tracker database initialization failed; scanner will continue without market-cap monitoring")
-        return
-
     try:
         interval = max(60, int(interval_seconds))
     except (TypeError, ValueError, OverflowError):
@@ -103,23 +97,34 @@ async def market_cap_monitor(database: TrackerDatabase | None = None, interval_s
     except (TypeError, ValueError, OverflowError):
         log.warning("Invalid TRACKER_BACKUP_INTERVAL_SECONDS; using 21600 seconds")
         backup_interval = 21600
-    last_backup = time.monotonic() - backup_interval if backup_interval else 0.0
 
+    last_backup = time.monotonic() - backup_interval if backup_interval else 0.0
     timeout = aiohttp.ClientTimeout(total=20, connect=10)
+    active_database = database
+
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             while True:
                 try:
-                    total = database.count()
-                    updated, missing = await update_once(database, session)
-                    log.info("Tracker market-cap monitor: %s/%s tokens recorded; updated=%s missing=%s",
-                             total, database.count(), updated, missing)
+                    if active_database is None:
+                        active_database = TrackerDatabase()
+
+                    total = active_database.count()
+                    updated, missing = await update_once(active_database, session)
+                    log.info(
+                        "Tracker market-cap monitor: %s/%s tokens recorded; updated=%s missing=%s",
+                        total, active_database.count(), updated, missing,
+                    )
                 except asyncio.CancelledError:
                     raise
                 except Exception:
                     log.exception("Tracker market-cap monitor cycle failed")
+                    # A failed database handle may be stale (for example, a
+                    # volume became unavailable). Reopen it on the next cycle.
+                    if database is None:
+                        active_database = None
 
-                if backup_interval and time.monotonic() - last_backup >= backup_interval:
+                if active_database is not None and backup_interval and time.monotonic() - last_backup >= backup_interval:
                     try:
                         from .backup import create_backup
                         backup_path = await asyncio.to_thread(create_backup)
