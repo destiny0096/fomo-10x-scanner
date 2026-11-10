@@ -51,9 +51,15 @@ class MarketCapParsingTests(unittest.IsolatedAsyncioTestCase):
 
 
 class MonitorIsolationTests(unittest.IsolatedAsyncioTestCase):
-    async def test_database_initialization_failure_is_contained(self):
-        with patch("tracker.market_monitor.TrackerDatabase", side_effect=OSError("disk unavailable")):
-            await market_cap_monitor(interval_seconds=60)
+    async def test_database_initialization_failure_is_contained_and_retried(self):
+        with patch.dict(os.environ, {"TRACKER_BACKUP_INTERVAL_SECONDS": "0"}), \
+             patch("tracker.market_monitor.TrackerDatabase", side_effect=OSError("disk unavailable")), \
+             patch("tracker.market_monitor.aiohttp.ClientSession") as session, \
+             patch("tracker.market_monitor.asyncio.sleep", new=AsyncMock(side_effect=asyncio.CancelledError)):
+            session.return_value.__aenter__ = AsyncMock(return_value=object())
+            session.return_value.__aexit__ = AsyncMock(return_value=None)
+            with self.assertRaises(asyncio.CancelledError):
+                await market_cap_monitor(interval_seconds=60)
 
 
     async def test_database_initialization_is_retried_after_transient_failure(self):
@@ -77,15 +83,10 @@ class MonitorIsolationTests(unittest.IsolatedAsyncioTestCase):
                 raise OSError("disk temporarily unavailable")
             return FakeDatabase()
 
-        async def stop_after_second_cycle(_interval):
-            if calls >= 2:
-                raise asyncio.CancelledError
-            await asyncio.sleep(0)
-
         with patch.dict(os.environ, {"TRACKER_BACKUP_INTERVAL_SECONDS": "0"}), \
              patch("tracker.market_monitor.TrackerDatabase", side_effect=database_factory), \
              patch("tracker.market_monitor.aiohttp.ClientSession", return_value=FakeSession()), \
-             patch("tracker.market_monitor.asyncio.sleep", new=AsyncMock(side_effect=stop_after_second_cycle)):
+             patch("tracker.market_monitor.asyncio.sleep", new=AsyncMock(side_effect=[None, asyncio.CancelledError])):
             with self.assertRaises(asyncio.CancelledError):
                 await market_cap_monitor(interval_seconds=60)
         self.assertEqual(calls, 2)
