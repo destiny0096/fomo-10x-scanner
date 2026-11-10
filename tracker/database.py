@@ -25,16 +25,17 @@ def configured_database_path() -> Path:
 
 
 class TrackerDatabase:
-    def __init__(self, path: str | Path | None = None):
+    def __init__(self, path: str | Path | None = None, *, timeout_seconds: float = 30.0):
         self.path = Path(path).expanduser() if path is not None else configured_database_path()
+        self.timeout_seconds = max(0.1, float(timeout_seconds))
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
     @contextmanager
     def _connect(self):
-        db = sqlite3.connect(str(self.path), timeout=30)
+        db = sqlite3.connect(str(self.path), timeout=self.timeout_seconds)
         db.row_factory = sqlite3.Row
-        db.execute("PRAGMA busy_timeout = 30000")
+        db.execute(f"PRAGMA busy_timeout = {int(self.timeout_seconds * 1000)}")
         try:
             yield db
             db.commit()
@@ -61,6 +62,11 @@ class TrackerDatabase:
             db.execute("""CREATE TABLE IF NOT EXISTS mc_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, address TEXT NOT NULL,
                 market_cap REAL NOT NULL, observed_at TEXT NOT NULL)""")
+            db.execute("""CREATE TABLE IF NOT EXISTS candidate_queue (
+                address TEXT PRIMARY KEY, token_json TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL, claimed_at TEXT, last_error TEXT,
+                completed_at TEXT)""")
 
     def integrity_check(self) -> bool:
         """Return True only when SQLite reports a clean database."""
@@ -181,6 +187,52 @@ class TrackerDatabase:
                 "SELECT COUNT(*) FROM notification_outbox WHERE status!='sent'"
             ).fetchone()[0])
 
+    def enqueue_candidate(self, token: dict[str, Any]) -> str:
+        """Durably queue a scanner alert for evidence evaluation."""
+        address = str(token.get("address") or "").strip()
+        if not address:
+            return "invalid"
+        payload = {"address": address, "name": str(token.get("name") or ""),
+                   "symbol": str(token.get("symbol") or ""), "market_cap": token.get("market_cap")}
+        serialized = json.dumps(payload, sort_keys=True, allow_nan=False)
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            cursor = db.execute("""INSERT OR IGNORE INTO candidate_queue
+                (address, token_json, status, created_at) VALUES (?, ?, 'pending', ?)""",
+                (address, serialized, now))
+            return "queued" if cursor.rowcount == 1 else "duplicate"
+
+    def claim_next_candidate(self, *, lease_minutes: int = 10) -> dict[str, Any] | None:
+        """Atomically claim pending work; crashed claims expire after a lease."""
+        now = datetime.now(timezone.utc)
+        stale = (now - timedelta(minutes=max(1, lease_minutes))).isoformat()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("""SELECT address, token_json FROM candidate_queue
+                WHERE status='pending' OR (status='processing' AND claimed_at < ?)
+                ORDER BY created_at LIMIT 1""", (stale,)).fetchone()
+            if row is None:
+                return None
+            db.execute("""UPDATE candidate_queue SET status='processing', claimed_at=?,
+                attempts=attempts+1, last_error=NULL WHERE address=?""",
+                (now.isoformat(), row["address"]))
+            return json.loads(row["token_json"])
+
+    def complete_candidate(self, address: str) -> None:
+        with self._connect() as db:
+            db.execute("""UPDATE candidate_queue SET status='completed', completed_at=?,
+                claimed_at=NULL, last_error=NULL WHERE address=?""",
+                (datetime.now(timezone.utc).isoformat(), address))
+
+    def retry_candidate(self, address: str, error: str = "") -> None:
+        with self._connect() as db:
+            db.execute("""UPDATE candidate_queue SET status='pending', claimed_at=NULL,
+                last_error=? WHERE address=?""", (str(error)[:300], address))
+
+    def pending_candidate_count(self) -> int:
+        with self._connect() as db:
+            return int(db.execute("SELECT COUNT(*) FROM candidate_queue WHERE status!='completed'").fetchone()[0])
     def record_market_cap(self, address: str, market_cap: float, observed_at: str) -> bool:
         try:
             value = float(market_cap)
