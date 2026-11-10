@@ -59,6 +59,24 @@ class IntegrationBridgeTests(unittest.IsolatedAsyncioTestCase):
         export.assert_not_called()
         send_csv.assert_not_awaited()
 
+    async def test_pending_milestone_delivery_marks_sent_only_after_success(self):
+        import tempfile
+        from pathlib import Path
+        from tracker.database import TrackerDatabase
+
+        with tempfile.TemporaryDirectory() as d:
+            db = TrackerDatabase(Path(d) / "tracker.db")
+            token = {"address": "OutboxMint", "symbol": "OUT", "market_cap": 100}
+            db.add_qualified(token, "2026-11-10T10:00:00Z")
+            with patch("tracker.integration.send_progress_notification", new=AsyncMock(return_value=False)) as send:
+                delivered = await __import__("tracker.integration", fromlist=["deliver_pending_notifications"]).deliver_pending_notifications(db)
+            self.assertEqual(delivered, 0)
+            self.assertEqual(db.pending_notification_count(), 1)
+            with patch("tracker.integration.send_progress_notification", new=AsyncMock(return_value=True)) as send:
+                delivered = await __import__("tracker.integration", fromlist=["deliver_pending_notifications"]).deliver_pending_notifications(db)
+            self.assertEqual(delivered, 1)
+            self.assertEqual(db.pending_notification_count(), 0)
+
     async def test_drain_waits_for_background_tracker_tasks(self):
         import asyncio
         started = asyncio.Event()
