@@ -82,14 +82,36 @@ async def track_alerted_token(token: dict[str, Any]) -> dict[str, Any]:
 
 
 def schedule_tracking(token: dict[str, Any]) -> bool:
-    """Schedule background tracking; return False only if no event loop is running."""
+    """Schedule background tracking without allowing tracker failures to escape."""
+    coroutine = None
     try:
-        task = asyncio.create_task(track_alerted_token(dict(token)))
-    except RuntimeError:
-        logger.exception("Could not schedule tracker task: no active event loop")
+        coroutine = track_alerted_token(dict(token))
+        task = asyncio.create_task(coroutine)
+    except Exception:
+        # If task creation fails, close the coroutine to avoid an
+        # "unawaited coroutine" warning during scanner operation.
+        if coroutine is not None:
+            coroutine.close()
+        logger.exception("Could not schedule tracker task")
         return False
+
     _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+
+    def _task_finished(completed: asyncio.Task) -> None:
+        _background_tasks.discard(completed)
+        if completed.cancelled():
+            return
+        try:
+            error = completed.exception()
+        except asyncio.CancelledError:
+            return
+        if error is not None:
+            logger.error(
+                "Unexpected uncaught tracker task error",
+                exc_info=(type(error), error, error.__traceback__),
+            )
+
+    task.add_done_callback(_task_finished)
     return True
 
 
