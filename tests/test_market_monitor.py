@@ -107,6 +107,80 @@ class MonitorIsolationTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(asyncio.CancelledError):
                 await market_cap_monitor(database=FakeDatabase(), interval_seconds=60)
 
+
+    async def test_database_handle_is_reopened_after_runtime_io_failure(self):
+        class FakeDatabase:
+            def __init__(self, label):
+                self.label = label
+            def count(self):
+                return 1
+            def list_tokens(self):
+                return [{"address": "MintRuntime"}]
+
+        class FakeSession:
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                return None
+
+        instances = []
+        def database_factory():
+            db = FakeDatabase(len(instances) + 1)
+            instances.append(db)
+            return db
+
+        async def update_with_runtime_failure(database, _session):
+            if database.label == 1:
+                raise OSError("database volume temporarily unavailable")
+            return 1, 0
+
+        with patch.dict(os.environ, {"TRACKER_BACKUP_INTERVAL_SECONDS": "0"}), \
+             patch("tracker.market_monitor.TrackerDatabase", side_effect=database_factory), \
+             patch("tracker.market_monitor.aiohttp.ClientSession", return_value=FakeSession()), \
+             patch("tracker.market_monitor.update_once", new=AsyncMock(side_effect=update_with_runtime_failure)) as update, \
+             patch("tracker.market_monitor.asyncio.sleep", new=AsyncMock(side_effect=[None, asyncio.CancelledError])):
+            with self.assertRaises(asyncio.CancelledError):
+                await market_cap_monitor(interval_seconds=60)
+
+        self.assertEqual(len(instances), 2)
+        self.assertEqual(update.await_count, 2)
+        self.assertIs(update.await_args_list[0].args[0], instances[0])
+        self.assertIs(update.await_args_list[1].args[0], instances[1])
+
+    async def test_database_handle_is_reopened_after_runtime_count_failure(self):
+        class FakeDatabase:
+            def __init__(self, broken=False):
+                self.broken = broken
+            def count(self):
+                if self.broken:
+                    raise OSError("database read failed")
+                return 0
+            def list_tokens(self):
+                return []
+
+        class FakeSession:
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                return None
+
+        instances = []
+        def database_factory():
+            db = FakeDatabase(broken=not instances)
+            instances.append(db)
+            return db
+
+        with patch.dict(os.environ, {"TRACKER_BACKUP_INTERVAL_SECONDS": "0"}), \
+             patch("tracker.market_monitor.TrackerDatabase", side_effect=database_factory), \
+             patch("tracker.market_monitor.aiohttp.ClientSession", return_value=FakeSession()), \
+             patch("tracker.market_monitor.asyncio.sleep", new=AsyncMock(side_effect=[None, asyncio.CancelledError])):
+            with self.assertRaises(asyncio.CancelledError):
+                await market_cap_monitor(interval_seconds=60)
+
+        self.assertEqual(len(instances), 2)
+        self.assertTrue(instances[0].broken)
+        self.assertFalse(instances[1].broken)
+
     async def test_scheduled_backup_runs_on_startup(self):
         class FakeDatabase:
             def count(self):
