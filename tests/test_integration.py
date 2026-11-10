@@ -114,6 +114,12 @@ class IntegrationBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(task.cancelled())
         self.assertNotIn(task, _background_tasks)
 
+    async def test_tracker_cancellation_is_not_swallowed_as_tracker_error(self):
+        cancelled = AsyncMock(side_effect=__import__("asyncio").CancelledError())
+        with patch("tracker.integration.evaluate_and_record", new=cancelled):
+            with self.assertRaises(__import__("asyncio").CancelledError):
+                await track_alerted_token({"address": "MintCancelled", "symbol": "CXL"})
+        cancelled.assert_awaited_once()
 
     async def test_schedule_failure_is_contained_and_coroutine_is_closed(self):
         from tracker.integration import schedule_tracking
