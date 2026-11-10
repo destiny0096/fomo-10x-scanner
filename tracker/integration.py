@@ -70,14 +70,17 @@ async def track_alerted_token(token: dict[str, Any]) -> dict[str, Any]:
         return {"status": "tracker_error"}
 
 
-async def process_pending_candidates() -> int:
-    """Drain durable scanner-alert work; interrupted claims are recoverable."""
+async def process_pending_candidates(*, wait_for_retry: bool = False) -> int:
+    """Drain durable scanner-alert work; optionally poll until deferred work is ready."""
     processed = 0
     async with _candidate_worker_lock:
         database = TrackerDatabase(timeout_seconds=1.0)
         while True:
             candidate = database.claim_next_candidate()
             if candidate is None:
+                if wait_for_retry and database.pending_candidate_count() > 0:
+                    await asyncio.sleep(60)
+                    continue
                 break
             address = candidate["address"]
             try:
@@ -95,6 +98,9 @@ async def process_pending_candidates() -> int:
                 # next worker start rather than hot-looping on the same candidate.
                 database.retry_candidate(address, result.get("reason", status))
                 logger.warning("Tracker candidate %s deferred for retry: %s", address, status)
+                if wait_for_retry:
+                    await asyncio.sleep(60)
+                    continue
                 break
 
             database.complete_candidate(address)
@@ -122,7 +128,7 @@ def _register_task(task: asyncio.Task) -> None:
 
 def _start_candidate_worker() -> bool:
     try:
-        task = asyncio.create_task(process_pending_candidates(), name="fomo-tracker-candidate-queue")
+        task = asyncio.create_task(process_pending_candidates(wait_for_retry=True), name="fomo-tracker-candidate-queue")
     except Exception:
         logger.exception("Could not start durable tracker candidate worker")
         return False
