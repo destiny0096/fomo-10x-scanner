@@ -21,7 +21,8 @@ REQUIRED_TABLES = {"tracked_tokens", "mc_snapshots"}
 def _validate_database(path: Path) -> None:
     if not path.is_file():
         raise FileNotFoundError(f"Database file does not exist: {path}")
-    with closing(sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)) as db:
+    database_uri = path.resolve().as_uri() + "?mode=ro"
+    with closing(sqlite3.connect(database_uri, uri=True)) as db:
         result = db.execute("PRAGMA integrity_check").fetchone()
         if not result or result[0] != "ok":
             raise sqlite3.DatabaseError(f"SQLite integrity check failed: {path}")
@@ -49,19 +50,20 @@ def restore_backup(
         raise ValueError("Backup source and live database destination must differ")
     _validate_database(source)
 
+    # Sidecars can exist even if the main database file is missing. Replacing
+    # the database in that state could leave SQLite applying stale WAL data.
+    sidecars = [Path(str(target) + suffix) for suffix in ("-wal", "-shm")]
+    present = [str(path) for path in sidecars if path.exists()]
+    if present:
+        raise RuntimeError(
+            "Refusing restore because SQLite sidecar files exist: "
+            + ", ".join(present)
+            + ". Stop the bot and resolve the active/stale SQLite sidecars first."
+        )
     if target.exists() and not force:
         raise FileExistsError(
             f"Live database already exists: {target}. Use --force to replace it."
         )
-    if target.exists():
-        sidecars = [Path(str(target) + suffix) for suffix in ("-wal", "-shm")]
-        present = [str(path) for path in sidecars if path.exists()]
-        if present:
-            raise RuntimeError(
-                "Refusing restore because SQLite sidecar files exist: "
-                + ", ".join(present)
-                + ". Stop the bot and resolve the active/stale SQLite sidecars first."
-            )
 
     target.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
@@ -70,7 +72,8 @@ def restore_backup(
     os.close(descriptor)
     temporary = Path(temporary_name)
     try:
-        with closing(sqlite3.connect(f"file:{source}?mode=ro", uri=True)) as source_db:
+        source_uri = source.as_uri() + "?mode=ro"
+        with closing(sqlite3.connect(source_uri, uri=True)) as source_db:
             with closing(sqlite3.connect(str(temporary))) as destination_db:
                 source_db.backup(destination_db)
         _validate_database(temporary)
