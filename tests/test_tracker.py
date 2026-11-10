@@ -391,6 +391,16 @@ class PersistenceTests(unittest.TestCase):
                                    (expired, "QueueLease"))
             self.assertEqual(db.claim_next_candidate()["address"], "QueueLease")
 
+
+    def test_retried_candidate_moves_behind_other_pending_work(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = TrackerDatabase(Path(d) / "tracker.db")
+            db.enqueue_candidate({"address": "QueueFirst", "market_cap": 100})
+            db.enqueue_candidate({"address": "QueueSecond", "market_cap": 100})
+            self.assertEqual(db.claim_next_candidate()["address"], "QueueFirst")
+            db.retry_candidate("QueueFirst", "temporary source outage")
+            self.assertEqual(db.claim_next_candidate()["address"], "QueueSecond")
+
     def test_candidate_queue_rejects_non_finite_json_market_cap(self):
         with tempfile.TemporaryDirectory() as d:
             db = TrackerDatabase(Path(d) / "tracker.db")
