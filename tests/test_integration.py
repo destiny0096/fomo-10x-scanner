@@ -160,8 +160,11 @@ class IntegrationBridgeTests(unittest.IsolatedAsyncioTestCase):
             start.assert_called_once()
 
     async def test_queue_database_failure_uses_volatile_fallback(self):
-        with patch("tracker.integration.TrackerDatabase", side_effect=OSError("disk offline")), patch("tracker.integration.asyncio.create_task") as create_task:
-            create_task.return_value = unittest.mock.Mock()
+        def accept_coroutine(coroutine):
+            coroutine.close()
+            return unittest.mock.Mock()
+
+        with patch("tracker.integration.TrackerDatabase", side_effect=OSError("disk offline")), patch("tracker.integration.asyncio.create_task", side_effect=accept_coroutine) as create_task:
             self.assertTrue(schedule_tracking({"address": "FallbackMint"}))
             create_task.assert_called_once()
 
