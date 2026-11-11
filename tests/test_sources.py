@@ -1,0 +1,122 @@
+import asyncio
+import socket
+import unittest
+from unittest.mock import patch
+
+from tracker.sources import (
+    PublicOnlyResolver, _MetaParser, _identity_match, is_safe_project_url,
+    collect_attention_evidence, _get_text,
+)
+
+
+class SourceAdapterTests(unittest.TestCase):
+    def test_reads_project_description_metadata(self):
+        parser = _MetaParser()
+        parser.feed('<html><head><title>Example Token</title><meta name="description" content="A community project about art"></head></html>')
+        self.assertEqual(parser.description, "A community project about art")
+        self.assertEqual(" ".join(parser.title_parts), "Example Token")
+
+    def test_identity_requires_address_or_name_and_symbol(self):
+        self.assertTrue(_identity_match("We are discussing ExampleToken (EXT)", "MintABC", "ExampleToken", "EXT"))
+        self.assertTrue(_identity_match("MintABC is trending", "MintABC", "ExampleToken", "EXT"))
+        self.assertFalse(_identity_match("EXT is trending", "MintABC", "ExampleToken", "EXT"))
+        self.assertFalse(_identity_match("Another project has a similar name", "MintABC", "ExampleToken", "EXT"))
+
+    def test_project_site_url_must_be_safe_https(self):
+        self.assertTrue(is_safe_project_url("https://example.org/about"))
+        self.assertFalse(is_safe_project_url("http://example.org"))
+        self.assertFalse(is_safe_project_url("https://localhost/admin"))
+        self.assertFalse(is_safe_project_url("https://127.0.0.1/admin"))
+        self.assertFalse(is_safe_project_url("https://[::1]/admin"))
+        self.assertFalse(is_safe_project_url("https://service.internal"))
+        self.assertFalse(is_safe_project_url("https://user:pass@example.org"))
+        self.assertFalse(is_safe_project_url("javascript:alert(1)"))
+
+
+class PublicResolverTests(unittest.IsolatedAsyncioTestCase):
+    async def test_project_site_html_is_size_limited(self):
+        class FakeContent:
+            def __init__(self, chunks):
+                self.chunks = chunks
+            async def iter_chunked(self, size):
+                for chunk in self.chunks:
+                    yield chunk
+
+        class FakeResponse:
+            status = 200
+            headers = {"Content-Type": "text/html; charset=utf-8"}
+            charset = "utf-8"
+            def __init__(self, chunks):
+                self.content = FakeContent(chunks)
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                return None
+
+        class FakeSession:
+            def __init__(self, chunks):
+                self.response = FakeResponse(chunks)
+            def get(self, *args, **kwargs):
+                return self.response
+
+        html = b"<html><meta name='description' content='Project description'></html>"
+        self.assertEqual(await _get_text(FakeSession([html]), "https://example.org"), html.decode())
+        oversized = b"x" * 500_001
+        self.assertIsNone(await _get_text(FakeSession([oversized]), "https://example.org"))
+
+    async def test_resolver_returns_only_public_ip_addresses(self):
+        class FakeLoop:
+            async def getaddrinfo(self, host, port, family, type):
+                return [
+                    (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("8.8.8.8", port)),
+                    (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", port)),
+                ]
+
+        with patch("tracker.sources.asyncio.get_running_loop", return_value=FakeLoop()):
+            records = await PublicOnlyResolver().resolve("example.org", 443, socket.AF_UNSPEC)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["host"], "8.8.8.8")
+
+    async def test_reddit_adapter_returns_measured_distinct_author_metrics(self):
+        class FakeResponse:
+            status = 200
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                return None
+            async def json(self, content_type=None):
+                return {"data": {"children": [
+                    {"data": {"id": "p1", "author": "alice",
+                              "title": "ExampleToken EXT community launch",
+                              "permalink": "/r/example/comments/p1/launch",
+                              "score": 3, "num_comments": 1}},
+                    {"data": {"id": "p2", "author": "bob",
+                              "title": "ExampleToken EXT project discussion",
+                              "permalink": "/r/example/comments/p2/discussion",
+                              "score": 1, "num_comments": 1}},
+                ]}}
+
+        class FakeSession:
+            def get(self, *args, **kwargs):
+                return FakeResponse()
+
+        evidence = await collect_attention_evidence(
+            FakeSession(), "MintABC", "ExampleToken", "EXT"
+        )
+        self.assertEqual(len(evidence), 1)
+        self.assertEqual(evidence[0]["distinct_authors"], 2)
+        self.assertEqual(evidence[0]["post_count"], 2)
+        self.assertEqual(evidence[0]["engagement"], 6)
+
+    async def test_resolver_rejects_hosts_that_only_resolve_private(self):
+        class FakeLoop:
+            async def getaddrinfo(self, host, port, family, type):
+                return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("10.0.0.5", port))]
+
+        with patch("tracker.sources.asyncio.get_running_loop", return_value=FakeLoop()):
+            with self.assertRaises(OSError):
+                await PublicOnlyResolver().resolve("internal.example", 443, socket.AF_UNSPEC)
+
+
+if __name__ == "__main__":
+    unittest.main()

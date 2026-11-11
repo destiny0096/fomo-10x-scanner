@@ -1,0 +1,33 @@
+name: FOMO Tracker Test 4
+
+on:
+  push:
+    branches:
+      - feature/fomo-tracker-test-4
+    paths:
+      - 'tracker/**'
+      - 'bot.py'
+      - 'tests/**'
+      - '.github/workflows/tracker-tests.yml'
+  pull_request:
+    paths:
+      - 'tracker/**'
+      - 'tests/**'
+      - '.github/workflows/tracker-tests.yml'
+
+jobs:
+  tracker-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install scanner and tracker dependencies
+        run: pip install -r requirements.txt
+      - name: Compile scanner and tracker modules
+        run: python -m compileall -q bot.py tracker tests
+      - name: Run isolated tracker tests
+        run: python -m unittest discover -s tests -v

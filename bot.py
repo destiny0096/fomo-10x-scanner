@@ -1,6 +1,7 @@
 import os
 import asyncio
 import logging
+import math
 import time
 from datetime import datetime, timezone
 
@@ -10,6 +11,8 @@ from aiohttp import web
 from security_test import check_security, security_summary
 from lp_test import check_lp_status, lp_status_text
 from sell_route_test import check_sell_route, sell_route_text
+from tracker.integration import deliver_pending_notifications, drain_tracking_tasks, resume_pending_tracking, schedule_tracking
+from tracker.market_monitor import market_cap_monitor
 
 
 # ============================================================
@@ -418,40 +421,38 @@ def best_solana_pairs(pairs):
         )
         return {}
 
+    def pair_liquidity(pair):
+        data = pair.get("liquidity") or {}
+        if not isinstance(data, dict):
+            return 0.0
+        try:
+            value = float(data.get("usd") or 0)
+        except (TypeError, ValueError, OverflowError):
+            return 0.0
+        return value if math.isfinite(value) and value >= 0 else 0.0
+
     best_pairs = {}
 
     for pair in pairs:
 
-        if pair.get("chainId") != "solana":
+        # DexScreener payloads should contain pair objects, but malformed
+        # entries must not abort the entire scanner batch.
+        if not isinstance(pair, dict) or pair.get("chainId") != "solana":
             continue
 
         token = pair.get("baseToken") or {}
+        if not isinstance(token, dict):
+            continue
         address = token.get("address")
 
         if not address:
             continue
 
-        liquidity_data = pair.get("liquidity") or {}
-
-        liquidity = float(
-            liquidity_data.get("usd") or 0
-        )
-
+        liquidity = pair_liquidity(pair)
         current = best_pairs.get(address)
 
-        if current is None:
-
+        if current is None or liquidity > pair_liquidity(current):
             best_pairs[address] = pair
-
-        else:
-
-            current_liquidity = float(
-                (current.get("liquidity") or {}).get("usd")
-                or 0
-            )
-
-            if liquidity > current_liquidity:
-                best_pairs[address] = pair
 
     return best_pairs
 
@@ -582,8 +583,25 @@ async def evaluate_pair(session, pair):
     # Only mark the token alerted after Telegram confirms success.
     await tg(session, message)
 
+    # Telegram has succeeded: commit scanner-side alert bookkeeping first.
+    # Tracker scheduling is optional and must never cause a duplicate scanner alert.
     alerted.add(address)
     candidates.pop(address, None)
+
+    # The scanner may use FDV as a fallback for its existing alert filter.
+    # The tracker must receive reported marketCap only, never FDV mislabeled as MC.
+    try:
+        schedule_tracking({
+            "address": address,
+            "name": token.get("name", ""),
+            "symbol": token.get("symbol", ""),
+            "market_cap": pair.get("marketCap"),
+        })
+    except Exception:
+        logging.exception(
+            "Tracker scheduling failed for %s; scanner alert remains recorded",
+            address,
+        )
 
     logging.info(
         "ALERT %s %s score=%s "
@@ -689,13 +707,39 @@ async def main():
 
 async def run():
     runner = await start_health_server()
-
     try:
-        await main()
+        # Retry durable milestone notifications left pending by a previous
+        # shutdown or Telegram outage. Delivery failure must not stop scanning.
+        try:
+            await deliver_pending_notifications()
+        except Exception:
+            logging.exception("Could not drain pending tracker notifications at startup")
 
+        # Resume any scanner alerts durably queued before the previous process stopped.
+        resume_pending_tracking()
+
+        try:
+            tracker_interval = int(os.getenv("TRACKER_MC_POLL_SECONDS", "300"))
+        except (TypeError, ValueError):
+            logging.warning("Invalid TRACKER_MC_POLL_SECONDS; using 300 seconds")
+            tracker_interval = 300
+
+        tracker_task = asyncio.create_task(
+            market_cap_monitor(interval_seconds=max(60, tracker_interval)),
+            name="fomo-tracker-market-cap-monitor",
+        )
+
+        try:
+            await main()
+        finally:
+            tracker_task.cancel()
+            try:
+                await tracker_task
+            except asyncio.CancelledError:
+                pass
+            await drain_tracking_tasks(timeout_seconds=20)
     finally:
         await runner.cleanup()
-
 
 if __name__ == "__main__":
     asyncio.run(run())
