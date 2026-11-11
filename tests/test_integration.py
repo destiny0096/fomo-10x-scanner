@@ -18,6 +18,12 @@ class IntegrationBridgeTests(unittest.IsolatedAsyncioTestCase):
             path = Path("/tmp/tracker-test")
             def count(self):
                 return 100
+            def claim_completion_export(self):
+                return True
+            def finish_completion_export(self, *, sent):
+                self.export_sent = sent
+            def pending_completion_export_count(self):
+                return 1
             def list_tokens(self):
                 return [
                     {"address": f"Mint{i}", "symbol": f"T{i}", "initial_mc": 100,
@@ -44,6 +50,12 @@ class IntegrationBridgeTests(unittest.IsolatedAsyncioTestCase):
             path = Path("/tmp/tracker_results.csv")
             def count(self):
                 return 100
+            def claim_completion_export(self):
+                return True
+            def finish_completion_export(self, *, sent):
+                self.export_sent = sent
+            def pending_completion_export_count(self):
+                return 1
             def list_tokens(self):
                 return []
 
@@ -58,6 +70,56 @@ class IntegrationBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["status"], "qualified")
         export.assert_not_called()
         send_csv.assert_not_awaited()
+
+
+    async def test_final_csv_failure_remains_queued_and_retries(self):
+        import tempfile
+        from pathlib import Path
+        from tracker.database import TrackerDatabase
+        from tracker.integration import deliver_pending_completion_export
+
+        with tempfile.TemporaryDirectory() as directory:
+            db = TrackerDatabase(Path(directory) / "tracker.db")
+            for index in range(100):
+                status = db.add_qualified(
+                    {"address": f"ExportMint{index}", "symbol": f"E{index}", "market_cap": 100},
+                    "2026-11-11T10:00:00Z",
+                )
+                self.assertEqual(status, "added")
+
+            with patch("tracker.integration.export_results", return_value=Path(directory) / "results.csv"), \
+                 patch("tracker.integration.send_completion_export", new=AsyncMock(return_value=False)):
+                self.assertFalse(await deliver_pending_completion_export(db))
+            self.assertEqual(db.pending_completion_export_count(), 1)
+
+            with patch("tracker.integration.export_results", return_value=Path(directory) / "results.csv"), \
+                 patch("tracker.integration.send_completion_export", new=AsyncMock(return_value=True)) as send:
+                self.assertTrue(await deliver_pending_completion_export(db))
+            send.assert_awaited_once()
+            self.assertEqual(db.pending_completion_export_count(), 0)
+
+    async def test_completion_export_claim_is_recoverable_after_restart(self):
+        import tempfile
+        from pathlib import Path
+        from tracker.database import TrackerDatabase
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "tracker.db"
+            db = TrackerDatabase(path)
+            for index in range(100):
+                db.add_qualified(
+                    {"address": f"RestartExport{index}", "market_cap": 100},
+                    "2026-11-11T10:00:00Z",
+                )
+            self.assertTrue(db.claim_completion_export())
+            restarted = TrackerDatabase(path)
+            self.assertEqual(restarted.pending_completion_export_count(), 1)
+            self.assertFalse(restarted.claim_completion_export())
+            with restarted._connect() as connection:
+                connection.execute(
+                    "UPDATE completion_export_queue SET claimed_at='2000-01-01T00:00:00+00:00' WHERE id=1"
+                )
+            self.assertTrue(restarted.claim_completion_export())
 
     async def test_pending_milestone_delivery_marks_sent_only_after_success(self):
         import tempfile
