@@ -98,6 +98,8 @@ async def track_alerted_token(token: dict[str, Any]) -> dict[str, Any]:
             await deliver_pending_notifications(database)
             if database.pending_completion_export_count() > 0:
                 await deliver_pending_completion_export(database)
+                if database.pending_completion_export_count() > 0:
+                    _start_completion_export_worker()
         return result
     except Exception:
         logger.exception("Tracker task failed for %s", token.get("address"))
