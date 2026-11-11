@@ -26,13 +26,14 @@ Required secret variables (set through the provider UI, never in GitHub files):
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
 
-Required storage configuration:
+Required storage configuration (simple Deplexo setup):
 
-- Mount the app's persistent data volume and set `TRACKER_DB_PATH` to an absolute path on it, for example `/data/tracker_data.db`.
-- Mount a second persistent filesystem/volume for backups and set `TRACKER_BACKUP_DIR` to a directory on that separate filesystem.
-- Keep `TRACKER_REQUIRE_SEPARATE_BACKUP_VOLUME=1`.
-- Do not assume that a folder named `/backups` is a separate volume; the preflight compares filesystem device IDs.
-- If the host cannot provide an independent backup volume, arrange an external backup destination before production. Do not silently disable the separate-volume requirement.
+- Use the existing persistent app volume mounted at `/data`.
+- Set `TRACKER_DB_PATH=/data/tracker_data.db`.
+- Set `TRACKER_BACKUP_DIR=/data/tracker_backups`.
+- Do not set `TRACKER_REQUIRE_SEPARATE_BACKUP_VOLUME=1`; the default allows local backups on the same persistent volume.
+- The tracker creates a verified SQLite backup every six hours and keeps the latest 28 local backup files.
+- Important limitation: local backups help with some database-level problems, but they cannot recover data if the entire Deplexo volume is deleted or lost. An off-site backup can be added later; it is not required to complete this tracker build.
 
 Recommended variables:
 
@@ -46,7 +47,7 @@ TRACKER_REQUIRE_SEPARATE_BACKUP_VOLUME=1
 
 ## 3. Run host-side preflight
 
-Only after the provider has mounted both volumes and configured the real Telegram secrets, run this command in the app/container shell:
+After the existing persistent volume and real Telegram secrets are configured, run this command in the app/container shell:
 
 ```bash
 python -m tracker.preflight
@@ -55,7 +56,7 @@ python -m tracker.preflight
 Expected checks:
 
 - database and backup paths are absolute and writable;
-- database and backup paths are on separate filesystems;
+- database and backup paths are writable; a same-volume warning is expected with the simple setup;
 - at least 100 MB is free on the database filesystem;
 - SQLite opens and passes `PRAGMA integrity_check`;
 - a temporary SQLite online backup can be written and validated;
@@ -77,7 +78,7 @@ After preflight passes and a deployment is explicitly approved:
 5. Confirm one real scanner alert is followed by a durable candidate-queue row and tracker evidence evaluation in logs/database.
 6. Confirm a qualified candidate is inserted only when both narrative and attention evidence pass. A rejected token should remain out of the 100-token cohort.
 7. Confirm market-cap updates use reported `marketCap`, not FDV.
-8. Confirm a backup appears in the independent backup volume and passes SQLite integrity validation.
+8. Confirm a timestamped backup appears under `/data/tracker_backups` and passes SQLite integrity validation.
 9. Confirm no unexpected repeated Telegram alerts, restart loops, or database errors.
 
 Do not insert fake tokens into the production 100-token cohort. Use a separate staging database/chat for destructive or synthetic end-to-end tests.
@@ -87,12 +88,12 @@ Do not insert fake tokens into the production 100-token cohort. Use a separate s
 Before relying on the tracker:
 
 - Create a backup with `python -m tracker.backup`.
-- Verify the backup exists on the independent backup volume.
+- Verify the backup exists under `/data/tracker_backups`.
 - Verify it opens and passes `PRAGMA integrity_check`.
 - Practice restore against a separate test database path, never the live production database.
 - For a real restore, stop the bot first and follow `python -m tracker.restore` instructions. Never restore over an active SQLite database.
 
-Backups kept only on the same app volume are not disaster recovery.
+Backups kept only on the same app volume are not disaster recovery; off-site backup can be added later.
 
 ## 6. Rollback
 
@@ -110,7 +111,7 @@ If the new release causes scanner or tracker instability:
 The GitHub-connected development workflow cannot inspect Deplexo's private app settings, create/mount Deplexo volumes, read its secret values, or run commands inside its container. Therefore the following cannot be truthfully completed from GitHub:
 
 - confirm the actual Deplexo persistent mount and filesystem;
-- configure a separate backup volume;
+- configure off-site backup storage (optional for this initial build);
 - confirm the production Telegram secrets are present and valid;
 - run the host-side preflight against those real settings;
 - verify a real deployment and live Telegram delivery.
