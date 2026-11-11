@@ -33,7 +33,7 @@ def check_storage(env: Mapping[str, str] | None = None) -> list[tuple[str, bool,
     if not db_value or not backup_value:
         return [
             ("TRACKER_DB_PATH", False, "Set an explicit database path on the persistent app volume."),
-            ("TRACKER_BACKUP_DIR", False, "Set a backup directory on a separate persistent volume."),
+            ("TRACKER_BACKUP_DIR", False, "Set a writable backup directory on the persistent app volume."),
         ]
 
     db_path = Path(db_value).expanduser()
@@ -51,15 +51,15 @@ def check_storage(env: Mapping[str, str] | None = None) -> list[tuple[str, bool,
         results.append(("storage writable", True, "Database and backup directories accept temporary writes."))
 
         same_device = db_path.parent.stat().st_dev == backup_dir.stat().st_dev
-        require_separate = values.get("TRACKER_REQUIRE_SEPARATE_BACKUP_VOLUME", "1").strip().lower() not in {"0", "false", "no"}
+        require_separate = values.get("TRACKER_REQUIRE_SEPARATE_BACKUP_VOLUME", "0").strip().lower() not in {"0", "false", "no"}
         if same_device and require_separate:
-            results.append(("independent backup volume", False,
-                            "Database and backup paths are on the same filesystem. Mount a separate backup volume or explicitly accept same-volume-only backups."))
+            results.append(("backup independence", False,
+                            "A separate backup filesystem was explicitly required but is not mounted."))
         elif same_device:
-            results.append(("independent backup volume", False,
-                            "WARNING: same filesystem; backups do not protect against loss of the app volume."))
+            results.append(("local backup", True,
+                            "Backup directory is writable on the app volume. WARNING: this protects against some database errors, not loss of the entire app volume."))
         else:
-            results.append(("independent backup volume", True, "Backup directory is on a different filesystem."))
+            results.append(("backup independence", True, "Backup directory is on a different filesystem."))
 
         usage = shutil.disk_usage(db_path.parent)
         if usage.free < 100 * 1024 * 1024:
