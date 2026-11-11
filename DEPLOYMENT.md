@@ -29,9 +29,9 @@ Required secret variables (set through the provider UI, never in GitHub files):
 Required storage configuration (simple Deplexo setup):
 
 - Use the existing persistent app volume mounted at `/data`.
-- Set `TRACKER_DB_PATH=/data/tracker_data.db`.
-- Set `TRACKER_BACKUP_DIR=/data/tracker_backups`.
-- Do not set `TRACKER_REQUIRE_SEPARATE_BACKUP_VOLUME=1`; the default allows local backups on the same persistent volume.
+- The app automatically uses `/data/tracker_data.db` when the persistent `/data` mount is available.
+- Backups automatically go to `/data/tracker_backups` beside the database.
+- No additional tracker storage environment variables are required for this setup. You may set `TRACKER_DB_PATH` and `TRACKER_BACKUP_DIR` explicitly, but leave `TRACKER_REQUIRE_SEPARATE_BACKUP_VOLUME` unset.
 - The tracker creates a verified SQLite backup every six hours and keeps the latest 28 local backup files.
 - Important limitation: local backups help with some database-level problems, but they cannot recover data if the entire Deplexo volume is deleted or lost. An off-site backup can be added later; it is not required to complete this tracker build.
 
@@ -42,7 +42,6 @@ TRACKER_MC_POLL_SECONDS=300
 TRACKER_BACKUP_INTERVAL_SECONDS=21600
 TRACKER_BACKUP_KEEP=28
 TRACKER_EXPORT_PATH=/data/tracker_results.csv
-TRACKER_REQUIRE_SEPARATE_BACKUP_VOLUME=1
 ```
 
 ## 3. Run host-side preflight
@@ -55,8 +54,8 @@ python -m tracker.preflight
 
 Expected checks:
 
-- database and backup paths are absolute and writable;
-- database and backup paths are writable; a same-volume warning is expected with the simple setup;
+- Deplexo's `/data` mount (or explicitly configured paths) is present and writable;
+- local database and backup paths are writable; a same-volume warning is expected with the simple setup;
 - at least 100 MB is free on the database filesystem;
 - SQLite opens and passes `PRAGMA integrity_check`;
 - a temporary SQLite online backup can be written and validated;
@@ -100,7 +99,7 @@ Backups kept only on the same app volume are not disaster recovery; off-site bac
 If the new release causes scanner or tracker instability:
 
 1. Stop the new deployment.
-2. Keep the persistent database and independent backups untouched.
+2. Keep the persistent database and local backups untouched.
 3. Revert the app to the previously working scanner commit/configuration.
 4. Do not delete SQLite `-wal` or `-shm` files manually.
 5. Inspect logs and database integrity before attempting another deployment.
