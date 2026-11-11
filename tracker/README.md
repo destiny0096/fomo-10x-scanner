@@ -28,18 +28,18 @@ The runtime database uses `/data/tracker_data.db` automatically only when `/data
 ### Database protection
 
 - Run `python -m tracker.backup` to create a timestamped SQLite backup.
-- Set `TRACKER_BACKUP_DIR` to a separate persistent volume/directory. If it is not set, backups go into `tracker_backups` beside the database; that is convenient but does not protect against loss of the whole disk.
+- On Deplexo, the database automatically uses `/data/tracker_data.db` when `/data` is mounted and writable; local backups go into `/data/tracker_backups` by default. `TRACKER_DB_PATH` and `TRACKER_BACKUP_DIR` can override these locations.
 - Backups use SQLite's online backup API and are integrity-checked before the backup file is published.
 - `TrackerDatabase.integrity_check()` checks the live database; `backup_to(path)` creates a validated backup programmatically.
 - To restore while the bot is stopped, run `python -m tracker.restore /path/to/tracker-backup.db`. The command validates SQLite integrity and required tracker tables, refuses to overwrite an existing live database by default, and refuses replacement when `-wal` or `-shm` sidecars are present. For an intentional replacement, use `python -m tracker.restore /path/to/backup.db --force`; it first creates a validated `.pre-restore-<timestamp>.db` safety copy of the current database. Never run restore while the scanner is active. If sidecars remain after shutdown, do not delete them blindly; investigate/resolve them before retrying.
-- When the bot is running, the market-cap monitor creates a validated backup at startup and every 6 hours by default. Set `TRACKER_BACKUP_INTERVAL_SECONDS=0` to disable scheduled backups, `TRACKER_BACKUP_KEEP` to change retention (default 28 files), and `TRACKER_BACKUP_DIR` to choose the destination. Backup failures are logged and do not stop the scanner. Do not treat a backup stored only on the same volume as independent disaster-recovery protection.
+- When the bot is running, the market-cap monitor creates a validated backup at startup and every 6 hours by default. Set `TRACKER_BACKUP_INTERVAL_SECONDS=0` to disable scheduled backups, `TRACKER_BACKUP_KEEP` to change retention (default 28 files), and `TRACKER_BACKUP_DIR` to choose the destination. Backup failures are logged and do not stop the scanner. These local backups help with accidental database/file-level problems but do not protect against loss of the entire Deplexo volume. Off-site backup is optional follow-up work, not a requirement for this initial tracker build.
 
-Do not use an ephemeral GitHub Actions runner as the long-term live tracker host. Before deployment, verify the persistent-volume mount and write permissions. A backup stored elsewhere on the same volume is useful for accidental file-level recovery but is not an independent disaster-recovery backup; periodically copy backups outside the app volume.
+Do not use an ephemeral GitHub Actions runner as the long-term live tracker host. Before deployment, verify the persistent-volume mount and write permissions. The default local backup directory is on the same persistent volume as the database; off-site disaster-recovery protection can be added later.
 
 ## Tests and deployment preflight
 
 Run from the repository root: `python -m unittest discover -s tests -v`.
 
-After configuring real hosting secrets and persistent mounts, run `python -m tracker.preflight` inside the deployment container. It checks explicit storage paths, separate backup filesystem, SQLite integrity/backup write, Telegram read-only authentication/chat access, DexScreener, and Reddit. It sends no Telegram messages and never prints credentials. Any failed check blocks go-live. See the repository `DEPLOYMENT.md` for provider setup and rollback steps.
+After configuring real hosting secrets and persistent mounts, run `python -m tracker.preflight` inside the deployment container. It checks Deplexo's persistent `/data` mount (or explicitly configured paths), SQLite integrity/backup write, Telegram read-only authentication/chat access, DexScreener, and Reddit. It sends no Telegram messages and never prints credentials. Any failed check blocks go-live. See the repository `DEPLOYMENT.md` for provider setup and rollback steps.
 
 The tracker is developed on `feature/fomo-tracker-test-4`. Merge to `main` and deploy only after explicit approval.
