@@ -62,6 +62,11 @@ class TrackerDatabase:
             db.execute("""CREATE TABLE IF NOT EXISTS mc_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, address TEXT NOT NULL,
                 market_cap REAL NOT NULL, observed_at TEXT NOT NULL)""")
+            db.execute("""CREATE TABLE IF NOT EXISTS completion_export_queue (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+                claimed_at TEXT, sent_at TEXT)
+            """)
             db.execute("""CREATE TABLE IF NOT EXISTS candidate_queue (
                 address TEXT PRIMARY KEY, token_json TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
@@ -136,6 +141,8 @@ class TrackerDatabase:
             # Queue milestone messages in the SAME transaction as the token insert.
             # This prevents concurrent qualifying tasks from skipping a boundary.
             count = int(db.execute("SELECT COUNT(*) FROM tracked_tokens").fetchone()[0])
+            if count == 100:
+                db.execute("INSERT OR IGNORE INTO completion_export_queue(id, status) VALUES (1, 'pending')")
             if count in {1, 25, 50, 75, 100}:
                 rows = db.execute("SELECT * FROM tracked_tokens ORDER BY id").fetchall()
                 payload = json.dumps([dict(row) for row in rows], sort_keys=True)
@@ -185,6 +192,46 @@ class TrackerDatabase:
         with self._connect() as db:
             return int(db.execute(
                 "SELECT COUNT(*) FROM notification_outbox WHERE status!='sent'"
+            ).fetchone()[0])
+
+    def claim_completion_export(self, *, lease_minutes: int = 5) -> bool:
+        """Claim the one-time cohort CSV delivery; stale claims are recoverable."""
+        now = datetime.now(timezone.utc)
+        stale = (now - timedelta(minutes=max(1, lease_minutes))).isoformat()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT status, claimed_at FROM completion_export_queue WHERE id=1"
+            ).fetchone()
+            if row is None or row["status"] == "sent":
+                return False
+            if row["status"] == "sending" and row["claimed_at"] and row["claimed_at"] >= stale:
+                return False
+            db.execute(
+                """UPDATE completion_export_queue SET status='sending',
+                claimed_at=?, attempts=attempts+1 WHERE id=1""",
+                (now.isoformat(),),
+            )
+            return True
+
+    def finish_completion_export(self, *, sent: bool) -> None:
+        """Mark the CSV delivered or release it for a later retry."""
+        with self._connect() as db:
+            if sent:
+                db.execute(
+                    """UPDATE completion_export_queue SET status='sent', sent_at=?,
+                    claimed_at=NULL WHERE id=1""",
+                    (datetime.now(timezone.utc).isoformat(),),
+                )
+            else:
+                db.execute(
+                    "UPDATE completion_export_queue SET status='pending', claimed_at=NULL WHERE id=1"
+                )
+
+    def pending_completion_export_count(self) -> int:
+        with self._connect() as db:
+            return int(db.execute(
+                "SELECT COUNT(*) FROM completion_export_queue WHERE status!='sent'"
             ).fetchone()[0])
 
     def enqueue_candidate(self, token: dict[str, Any]) -> str:
