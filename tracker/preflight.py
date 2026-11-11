@@ -28,13 +28,25 @@ TELEGRAM_API = "https://api.telegram.org"
 def check_storage(env: Mapping[str, str] | None = None) -> list[tuple[str, bool, str]]:
     values = os.environ if env is None else env
     results: list[tuple[str, bool, str]] = []
+    # Deplexo mounts its persistent app volume at /data. Use that
+    # automatically when available so deployment needs no extra path variables.
     db_value = values.get("TRACKER_DB_PATH", "").strip()
     backup_value = values.get("TRACKER_BACKUP_DIR", "").strip()
+    data_mount = Path("/data")
+    if not db_value:
+        if data_mount.is_dir() and os.access(data_mount, os.W_OK):
+            db_value = str(data_mount / "tracker_data.db")
+        else:
+            results.append(("TRACKER_DB_PATH", False,
+                            "Set TRACKER_DB_PATH or provide a writable persistent /data mount."))
+    if not backup_value:
+        if db_value:
+            backup_value = str(Path(db_value).expanduser().parent / "tracker_backups")
+        else:
+            results.append(("TRACKER_BACKUP_DIR", False,
+                            "Set TRACKER_BACKUP_DIR or provide a writable persistent /data mount."))
     if not db_value or not backup_value:
-        return [
-            ("TRACKER_DB_PATH", False, "Set an explicit database path on the persistent app volume."),
-            ("TRACKER_BACKUP_DIR", False, "Set a writable backup directory on the persistent app volume."),
-        ]
+        return results
 
     db_path = Path(db_value).expanduser()
     backup_dir = Path(backup_value).expanduser()
