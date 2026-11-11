@@ -41,6 +41,49 @@ async def deliver_pending_notifications(database: TrackerDatabase | None = None)
     return delivered
 
 
+async def deliver_pending_completion_export(database: TrackerDatabase | None = None) -> bool:
+    """Retry the durable final CSV delivery until Telegram confirms receipt."""
+    db = database or TrackerDatabase()
+    if not db.claim_completion_export():
+        return False
+    configured_export = os.getenv("TRACKER_EXPORT_PATH", "").strip()
+    export_path = (Path(configured_export).expanduser() if configured_export
+                   else db.path.parent / "tracker_results.csv")
+    sent = False
+    try:
+        if export_path.resolve() == db.path.resolve():
+            raise ValueError("Tracker results export cannot overwrite the live database")
+        completed_csv = export_results(db.list_tokens(), export_path)
+        sent = await send_completion_export(completed_csv)
+        return sent
+    except Exception:
+        logger.exception("Could not export or deliver completed Tracker Test 4 cohort")
+        return False
+    finally:
+        db.finish_completion_export(sent=sent)
+
+
+async def _completion_export_retry_worker() -> None:
+    """Keep retrying a failed final CSV delivery, including after process restarts."""
+    database = TrackerDatabase(timeout_seconds=1.0)
+    while database.pending_completion_export_count() > 0:
+        await deliver_pending_completion_export(database)
+        if database.pending_completion_export_count() > 0:
+            await asyncio.sleep(60)
+
+
+def _start_completion_export_worker() -> bool:
+    try:
+        task = asyncio.create_task(
+            _completion_export_retry_worker(), name="fomo-tracker-completion-export"
+        )
+    except Exception:
+        logger.exception("Could not start tracker completion-export retry worker")
+        return False
+    _register_task(task)
+    return True
+
+
 async def track_alerted_token(token: dict[str, Any]) -> dict[str, Any]:
     """Qualify a scanner alert, persist it, and notify at cohort milestones."""
     try:
@@ -53,17 +96,8 @@ async def track_alerted_token(token: dict[str, Any]) -> dict[str, Any]:
 
         if result.get("status") == "qualified":
             await deliver_pending_notifications(database)
-            if database.count() == 100:
-                configured_export = os.getenv("TRACKER_EXPORT_PATH", "").strip()
-                export_path = (Path(configured_export).expanduser() if configured_export
-                               else database.path.parent / "tracker_results.csv")
-                try:
-                    if export_path.resolve() == database.path.resolve():
-                        raise ValueError("Tracker results export cannot overwrite the live database")
-                    completed_csv = export_results(database.list_tokens(), export_path)
-                    await send_completion_export(completed_csv)
-                except Exception:
-                    logger.exception("Could not export or deliver completed Tracker Test 4 cohort")
+            if database.pending_completion_export_count() > 0:
+                await deliver_pending_completion_export(database)
         return result
     except Exception:
         logger.exception("Tracker task failed for %s", token.get("address"))
@@ -140,9 +174,14 @@ def resume_pending_tracking() -> bool:
     """Start processing candidates left pending by a previous process."""
     try:
         database = TrackerDatabase(timeout_seconds=1.0)
-        if database.pending_candidate_count() == 0:
-            return True
-        return _start_candidate_worker()
+        candidate_started = (
+            True if database.pending_candidate_count() == 0 else _start_candidate_worker()
+        )
+        export_started = (
+            True if database.pending_completion_export_count() == 0
+            else _start_completion_export_worker()
+        )
+        return candidate_started and export_started
     except Exception:
         logger.exception("Could not inspect durable tracker candidate queue at startup")
         return False
