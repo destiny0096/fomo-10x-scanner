@@ -205,9 +205,13 @@ def schedule_tracking(token: dict[str, Any]) -> bool:
         # never undo it; attempt a best-effort in-memory evaluation as fallback.
         logger.exception("Could not persist tracker candidate %s; using volatile fallback",
                          token.get("address"))
+        fallback_coroutine = track_alerted_token(dict(token))
         try:
-            task = asyncio.create_task(track_alerted_token(dict(token)))
+            task = asyncio.create_task(fallback_coroutine)
         except Exception:
+            # If there is no running loop, close the coroutine we just created
+            # so Python does not emit an unawaited-coroutine warning.
+            fallback_coroutine.close()
             logger.exception("Could not schedule volatile tracker fallback")
             return False
         _register_task(task)
