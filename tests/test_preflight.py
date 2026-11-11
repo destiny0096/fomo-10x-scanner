@@ -32,6 +32,15 @@ class StoragePreflightTests(unittest.TestCase):
             self.assertTrue(by_name["SQLite integrity"][0])
             self.assertTrue(by_name["backup write and validation"][0])
 
+    def test_backup_directory_defaults_beside_explicit_database_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            results = check_storage({"TRACKER_DB_PATH": str(root / "data" / "tracker.db")})
+            by_name = {name: (passed, detail) for name, passed, detail in results}
+            self.assertTrue(by_name["storage writable"][0])
+            self.assertTrue(by_name["local backup"][0])
+            self.assertTrue(by_name["backup write and validation"][0])
+
     def test_same_volume_can_be_rejected_when_separate_volume_is_explicitly_required(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
