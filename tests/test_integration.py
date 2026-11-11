@@ -23,7 +23,7 @@ class IntegrationBridgeTests(unittest.IsolatedAsyncioTestCase):
             def finish_completion_export(self, *, sent):
                 self.export_sent = sent
             def pending_completion_export_count(self):
-                return 1
+                return 0 if getattr(self, "export_sent", False) else 1
             def list_tokens(self):
                 return [
                     {"address": f"Mint{i}", "symbol": f"T{i}", "initial_mc": 100,
@@ -64,7 +64,8 @@ class IntegrationBridgeTests(unittest.IsolatedAsyncioTestCase):
              patch("tracker.integration.evaluate_and_record", new=AsyncMock(return_value={"status": "qualified"})), \
              patch("tracker.integration.deliver_pending_notifications", new=AsyncMock(return_value=1)), \
              patch("tracker.integration.export_results") as export, \
-             patch("tracker.integration.send_completion_export", new=AsyncMock(return_value=True)) as send_csv:
+             patch("tracker.integration.send_completion_export", new=AsyncMock(return_value=True)) as send_csv, \
+             patch("tracker.integration._start_completion_export_worker", return_value=True):
             result = await track_alerted_token({"address": "Mint100", "symbol": "T100"})
 
         self.assertEqual(result["status"], "qualified")
