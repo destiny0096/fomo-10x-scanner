@@ -1,6 +1,7 @@
 """Production preflight for FOMO scanner + Tracker Test 4.
 
-Run inside the deployment container with the real environment configured:
+Run inside the deployment container after host secrets are configured. Deplexo's
+persistent /data mount is detected automatically; other hosts can set paths:
     python -m tracker.preflight
 
 This performs read-only Telegram/DexScreener/Reddit API checks and a temporary
