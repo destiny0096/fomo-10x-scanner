@@ -18,7 +18,7 @@ class StoragePreflightTests(unittest.TestCase):
         })
         self.assertFalse(results[0][1])
 
-    def test_writable_same_volume_is_flagged_as_not_independent_by_default(self):
+    def test_writable_same_volume_is_allowed_with_backup_warning_by_default(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             results = check_storage({
@@ -27,21 +27,21 @@ class StoragePreflightTests(unittest.TestCase):
             })
             by_name = {name: (passed, detail) for name, passed, detail in results}
             self.assertTrue(by_name["storage writable"][0])
-            self.assertFalse(by_name["independent backup volume"][0])
+            self.assertTrue(by_name["local backup"][0])
+            self.assertIn("WARNING", by_name["local backup"][1])
             self.assertTrue(by_name["SQLite integrity"][0])
             self.assertTrue(by_name["backup write and validation"][0])
 
-    def test_same_volume_can_only_be_allowed_with_explicit_warning(self):
+    def test_same_volume_can_be_rejected_when_separate_volume_is_explicitly_required(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             results = check_storage({
                 "TRACKER_DB_PATH": str(root / "data" / "tracker.db"),
                 "TRACKER_BACKUP_DIR": str(root / "backups"),
-                "TRACKER_REQUIRE_SEPARATE_BACKUP_VOLUME": "false",
+                "TRACKER_REQUIRE_SEPARATE_BACKUP_VOLUME": "true",
             })
             by_name = {name: (passed, detail) for name, passed, detail in results}
-            self.assertFalse(by_name["independent backup volume"][0])
-            self.assertIn("WARNING", by_name["independent backup volume"][1])
+            self.assertFalse(by_name["backup independence"][0])
 
 
 if __name__ == "__main__":
