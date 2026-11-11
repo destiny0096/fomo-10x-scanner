@@ -27,12 +27,11 @@ Configure these in the hosting provider's secret/environment settings. Never com
 
 - `TELEGRAM_BOT_TOKEN` — existing scanner bot token.
 - `TELEGRAM_CHAT_ID` — existing destination chat ID.
-- `TRACKER_DB_PATH` — explicit absolute path on a persistent mounted volume, e.g. `/data/tracker_data.db`.
-- `TRACKER_BACKUP_DIR` — explicit absolute path for local timestamped backups, e.g. `/data/tracker_backups`.
+- On Deplexo, the tracker automatically uses `/data/tracker_data.db` and stores local backups in `/data/tracker_backups` when the persistent `/data` mount is available.
+- `TRACKER_DB_PATH` and `TRACKER_BACKUP_DIR` are optional overrides for other hosting setups.
 
 Recommended tracker settings:
 
-- `TRACKER_REQUIRE_SEPARATE_BACKUP_VOLUME=1` — optional strict mode; leave unset for the simple single-volume Deplexo setup.
 - `TRACKER_MC_POLL_SECONDS=300` — market-cap polling interval (minimum 60 seconds).
 - `TRACKER_BACKUP_INTERVAL_SECONDS=21600` — backup every six hours.
 - `TRACKER_BACKUP_KEEP=28` — retain the latest 28 timestamped backups.
@@ -77,6 +76,6 @@ After the host's real secrets and persistent mounts are configured, run inside t
 python -m tracker.preflight
 ```
 
-It checks required storage paths, write access, SQLite integrity, a temporary online-backup write, Telegram bot authentication and chat access, DexScreener, and Reddit. It sends no Telegram messages and does not print credentials. A passing GitHub Actions test run is not a substitute for this host-side check.
+It checks Deplexo's persistent `/data` mount (or explicitly configured storage paths), write access, SQLite integrity, a temporary online-backup write, Telegram bot authentication and chat access, DexScreener, and Reddit. It sends no Telegram messages and does not print credentials. A passing GitHub Actions test run is not a substitute for this host-side check.
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for the go-live checklist and rollback procedure.
