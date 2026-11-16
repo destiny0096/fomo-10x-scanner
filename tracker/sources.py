@@ -144,6 +144,8 @@ async def _get_text(session: aiohttp.ClientSession, url: str) -> str | None:
     try:
         # Redirects are disabled so a public page cannot redirect into a private host.
         async with session.get(url, headers={"User-Agent": USER_AGENT}, allow_redirects=False) as response:
+            if response.status in {408, 425, 429} or response.status >= 500:
+                raise EvidenceSourceUnavailable(f"Project website returned HTTP {response.status}")
             if response.status != 200:
                 return None
             if "text/html" not in response.headers.get("Content-Type", "").lower():
