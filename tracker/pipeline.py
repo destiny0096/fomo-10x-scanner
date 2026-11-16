@@ -10,7 +10,7 @@ import math
 from typing import Any, Awaitable, Callable
 
 from .database import TrackerDatabase
-from .sources import collect_token_evidence
+from .sources import EvidenceSourceUnavailable, collect_token_evidence
 from .tracker import QualificationResult, qualify_token
 
 EvidenceCollector = Callable[..., Awaitable[dict[str, Any]]]
@@ -48,9 +48,13 @@ async def evaluate_and_record(
             token_name=str(token.get("name") or ""),
             symbol=str(token.get("symbol") or ""),
         )
-    except Exception as exc:
-        # A source outage is a fail-closed result, not a scanner-fatal exception.
-        return {"status": "evidence_error", "reason": f"Evidence collection failed: {type(exc).__name__}"}
+    except EvidenceSourceUnavailable as exc:
+        # Temporary source outages are deferred by the durable queue, never scored as empty evidence.
+        detail = str(exc).strip()[:180]
+        reason = f"Evidence source temporarily unavailable: {type(exc).__name__}"
+        if detail:
+            reason += f" ({detail})"
+        return {"status": "evidence_error", "reason": reason}
 
     candidate = {
         **token,
