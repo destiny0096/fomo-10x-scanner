@@ -13,6 +13,28 @@ from .export import export_results
 from .pipeline import evaluate_and_record
 
 logger = logging.getLogger(__name__)
+
+
+def _log_queue_diagnostics(database: TrackerDatabase, context: str) -> None:
+    """Log the exact SQLite file, durable queue counts and recent outcomes."""
+    try:
+        report = database.queue_diagnostics(recent_limit=8)
+        counts = report["queue_counts"]
+        logger.info(
+            "Tracker diagnostics (%s): db=%s qualified=%s queue_pending=%s "
+            "queue_processing=%s queue_completed=%s",
+            context, report["database_path"], report["tracked_tokens"],
+            counts.get("pending", 0), counts.get("processing", 0), counts.get("completed", 0),
+        )
+        for item in report["recent_candidates"]:
+            outcome = item.get("result_status") or item.get("last_error") or item.get("status")
+            reason = item.get("result_reason") or item.get("last_error") or ""
+            logger.info(
+                "Tracker candidate outcome: address=%s status=%s attempts=%s reason=%s",
+                item.get("address"), outcome, item.get("attempts"), str(reason)[:300],
+            )
+    except Exception:
+        logger.exception("Could not read tracker queue diagnostics (%s)", context)
 _notification_delivery_lock = asyncio.Lock()
 _candidate_worker_lock = asyncio.Lock()
 _background_tasks: set[asyncio.Task] = set()
@@ -139,8 +161,13 @@ async def process_pending_candidates(*, wait_for_retry: bool = False) -> int:
                     continue
                 break
 
-            database.complete_candidate(address)
+            database.complete_candidate(
+                address,
+                result_status=str(status or "unknown"),
+                result_reason=str(result.get("reason", "")),
+            )
             processed += 1
+        _log_queue_diagnostics(database, "after candidate batch")
     return processed
 
 
@@ -176,6 +203,7 @@ def resume_pending_tracking() -> bool:
     """Start processing candidates left pending by a previous process."""
     try:
         database = TrackerDatabase(timeout_seconds=1.0)
+        _log_queue_diagnostics(database, "startup/resume")
         candidate_started = (
             True if database.pending_candidate_count() == 0 else _start_candidate_worker()
         )
@@ -194,6 +222,8 @@ def schedule_tracking(token: dict[str, Any]) -> bool:
     try:
         database = TrackerDatabase(timeout_seconds=0.5)
         queued = database.enqueue_candidate(dict(token))
+        logger.info("Tracker candidate persisted: address=%s result=%s db=%s",
+                    token.get("address"), queued, database.path.resolve())
         if queued == "invalid":
             logger.warning("Tracker candidate has no address; not queued")
             return False
