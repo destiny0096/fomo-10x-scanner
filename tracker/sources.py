@@ -21,6 +21,11 @@ REDDIT_SEARCH_URL = "https://www.reddit.com/search.json?q={query}&sort=new&t=wee
 USER_AGENT = "FOMO10XTracker/1.0 (public evidence research)"
 
 
+class EvidenceSourceUnavailable(RuntimeError):
+    """A temporary public-source/network failure; candidate evaluation must retry."""
+
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -110,14 +115,27 @@ class _MetaParser(HTMLParser):
 
 
 async def _get_json(session: aiohttp.ClientSession, url: str) -> dict[str, Any] | None:
+    """Return no-result for permanent HTTP misses, but raise on transient outages.
+
+    DNS/connectivity failures, timeouts, rate limits and server errors are not
+    evidence that a token lacks narrative or attention. They must reach the
+    pipeline as EvidenceSourceUnavailable so its durable queue retries later.
+    """
     try:
         async with session.get(url, headers={"User-Agent": USER_AGENT}) as response:
+            if response.status in {408, 425, 429} or response.status >= 500:
+                raise EvidenceSourceUnavailable(f"Evidence source returned HTTP {response.status}")
             if response.status != 200:
                 return None
-            data = await response.json(content_type=None)
+            try:
+                data = await response.json(content_type=None)
+            except (ValueError, aiohttp.ClientError) as exc:
+                raise EvidenceSourceUnavailable(f"Evidence source returned invalid JSON: {type(exc).__name__}") from exc
             return data if isinstance(data, dict) else None
-    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
-        return None
+    except EvidenceSourceUnavailable:
+        raise
+    except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as exc:
+        raise EvidenceSourceUnavailable(f"Evidence source request failed: {type(exc).__name__}") from exc
 
 
 async def _get_text(session: aiohttp.ClientSession, url: str) -> str | None:
@@ -139,8 +157,8 @@ async def _get_text(session: aiohttp.ClientSession, url: str) -> str | None:
                 chunks.append(chunk)
             encoding = response.charset or "utf-8"
             return b"".join(chunks).decode(encoding, errors="replace")
-    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
-        return None
+    except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as exc:
+        raise EvidenceSourceUnavailable(f"Project website request failed: {type(exc).__name__}") from exc
 
 
 async def collect_narrative_evidence(
@@ -265,7 +283,7 @@ async def collect_attention_evidence(
 async def collect_token_evidence(
     address: str, token_name: str = "", symbol: str = "", timeout_seconds: int = 12
 ) -> dict[str, Any]:
-    """Collect both evidence categories without raising network errors to the scanner."""
+    """Collect both evidence categories; temporary outages propagate for queue retry."""
     timeout = aiohttp.ClientTimeout(total=timeout_seconds)
     connector = aiohttp.TCPConnector(resolver=PublicOnlyResolver())
     async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
