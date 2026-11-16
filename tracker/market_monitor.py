@@ -111,7 +111,8 @@ async def market_cap_monitor(database: TrackerDatabase | None = None, interval_s
 
                     total = active_database.count()
                     updated, missing = await update_once(active_database, session)
-                    queue = active_database.queue_diagnostics(recent_limit=1)["queue_counts"]
+                    diagnostics = getattr(active_database, "queue_diagnostics", None)
+                    queue = diagnostics(recent_limit=1)["queue_counts"] if callable(diagnostics) else {}
                     log.info(
                         "Tracker market-cap monitor: qualified_tokens=%s updated=%s missing=%s; "
                         "candidate_queue pending=%s processing=%s completed=%s",
