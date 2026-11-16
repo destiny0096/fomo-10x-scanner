@@ -91,6 +91,28 @@ class EvidenceSourceRetryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["status"], "rejected")
             self.assertEqual(db.count(), 0)
 
+    async def test_existing_database_queue_schema_is_upgraded_in_place(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "existing-tracker.db"
+            with sqlite3.connect(path) as connection:
+                connection.execute("""CREATE TABLE candidate_queue (
+                    address TEXT PRIMARY KEY, token_json TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL, claimed_at TEXT, last_error TEXT,
+                    completed_at TEXT)""")
+            db = TrackerDatabase(path)
+            columns = {row["name"] for row in db._connect().__enter__().execute(
+                "PRAGMA table_info(candidate_queue)"
+            ).fetchall()}
+            self.assertIn("result_status", columns)
+            self.assertIn("result_reason", columns)
+            db.enqueue_candidate({"address": "MigratedMint", "market_cap": 100})
+            self.assertEqual(db.claim_next_candidate()["address"], "MigratedMint")
+            db.complete_candidate("MigratedMint", "rejected", "migration test")
+            self.assertEqual(db.queue_diagnostics()["recent_candidates"][0]["result_reason"], "migration test")
+
     async def test_queue_diagnostics_distinguish_pending_from_completed_rejections(self):
         with tempfile.TemporaryDirectory() as directory:
             db = TrackerDatabase(Path(directory) / "tracker.db")
