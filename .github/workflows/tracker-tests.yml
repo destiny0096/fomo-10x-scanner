@@ -12,6 +12,7 @@ on:
   pull_request:
     paths:
       - 'tracker/**'
+      - 'bot.py'
       - 'tests/**'
       - '.github/workflows/tracker-tests.yml'
 
