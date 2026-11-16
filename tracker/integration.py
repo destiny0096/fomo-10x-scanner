@@ -155,7 +155,9 @@ async def process_pending_candidates(*, wait_for_retry: bool = False) -> int:
                 # A source/database outage is transient. Leave it queued for the
                 # next worker start rather than hot-looping on the same candidate.
                 database.retry_candidate(address, result.get("reason", status))
-                logger.warning("Tracker candidate %s deferred for retry: %s", address, status)
+                logger.warning("Tracker candidate %s deferred for retry: %s (%s)",
+                               address, status, str(result.get("reason", ""))[:300])
+                _log_queue_diagnostics(database, "candidate deferred for retry")
                 if wait_for_retry:
                     await asyncio.sleep(60)
                     continue
