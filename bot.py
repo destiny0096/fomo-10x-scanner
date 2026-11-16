@@ -371,7 +371,7 @@ def update_candidates(profiles):
             candidates.pop(address, None)
 
     logging.info(
-        "Tracking %s candidates; %s already alerted",
+        "Scanner discovery queue (in-memory only): %s candidates; %s already alerted",
         len(candidates),
         len(alerted),
     )
