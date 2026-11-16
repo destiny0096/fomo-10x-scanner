@@ -48,7 +48,7 @@ async def evaluate_and_record(
             token_name=str(token.get("name") or ""),
             symbol=str(token.get("symbol") or ""),
         )
-    except EvidenceSourceUnavailable as exc:
+    except (EvidenceSourceUnavailable, TimeoutError) as exc:
         # Temporary source outages are deferred by the durable queue, never scored as empty evidence.
         detail = str(exc).strip()[:180]
         reason = f"Evidence source temporarily unavailable: {type(exc).__name__}"
