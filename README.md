@@ -59,6 +59,8 @@ Do not add a Birdeye key for this version; the scanner's current market-data sou
 - Tracker records reported DexScreener `marketCap` only; it never substitutes FDV for tracker market cap.
 - Market-cap peaks are sampled at the configured interval; brief moves between polls can be missed.
 - The tracker queue substantially improves restart recovery, but there is a narrow gap between Telegram confirming an alert and the subsequent durable queue write. Database failure in that interval can leave an alert uncaptured by the tracker.
+- Temporary evidence-source failures (DNS/connectivity errors, timeouts, HTTP 408/425/429, and HTTP 5xx) are deferred for retry; they are not treated as failed narrative or attention evidence. Permanent no-result responses can still lead to a genuine qualification rejection.
+- Tracker logs report the exact SQLite database path, qualified-token count, candidate-queue counts (pending/processing/completed), and recent candidate outcomes. `Tracking ... candidates` is explicitly a scanner-only in-memory discovery counter, not the durable tracker queue.
 - Milestone notifications use an at-least-once outbox, so a rare duplicate is possible if the process crashes after Telegram accepts a message but before the database records delivery.
 
 ## Tests
