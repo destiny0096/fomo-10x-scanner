@@ -8,7 +8,7 @@ import aiohttp
 
 from tracker.database import TrackerDatabase
 from tracker.pipeline import evaluate_and_record
-from tracker.sources import EvidenceSourceUnavailable, _get_json
+from tracker.sources import EvidenceSourceUnavailable, _get_json, _get_text
 
 
 class _Response:
@@ -54,6 +54,10 @@ class EvidenceSourceRetryTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(EvidenceSourceUnavailable):
                     await _get_json(_Session(status=status), "https://api.example.test/data")
 
+    async def test_project_website_server_error_is_transient(self):
+        with self.assertRaises(EvidenceSourceUnavailable):
+            await _get_text(_Session(status=503), "https://example.com/about")
+
     async def test_permanent_not_found_is_a_no_result_not_a_network_retry(self):
         result = await _get_json(_Session(status=404), "https://api.example.test/data")
         self.assertIsNone(result)
@@ -70,7 +74,7 @@ class EvidenceSourceRetryTests(unittest.IsolatedAsyncioTestCase):
                 evidence_collector=unavailable_collector,
             )
             self.assertEqual(result["status"], "evidence_error")
-            self.assertIn("Evidence collection failed", result["reason"])
+            self.assertIn("Evidence source temporarily unavailable", result["reason"])
             self.assertEqual(db.count(), 0)
 
     async def test_empty_successful_evidence_remains_a_real_qualification_rejection(self):
