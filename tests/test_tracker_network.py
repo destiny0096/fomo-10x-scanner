@@ -103,9 +103,10 @@ class EvidenceSourceRetryTests(unittest.IsolatedAsyncioTestCase):
                     created_at TEXT NOT NULL, claimed_at TEXT, last_error TEXT,
                     completed_at TEXT)""")
             db = TrackerDatabase(path)
-            columns = {row["name"] for row in db._connect().__enter__().execute(
-                "PRAGMA table_info(candidate_queue)"
-            ).fetchall()}
+            with db._connect() as connection:
+                columns = {row["name"] for row in connection.execute(
+                    "PRAGMA table_info(candidate_queue)"
+                ).fetchall()}
             self.assertIn("result_status", columns)
             self.assertIn("result_reason", columns)
             db.enqueue_candidate({"address": "MigratedMint", "market_cap": 100})
