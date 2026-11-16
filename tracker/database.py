@@ -71,7 +71,13 @@ class TrackerDatabase:
                 address TEXT PRIMARY KEY, token_json TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL, claimed_at TEXT, last_error TEXT,
-                completed_at TEXT)""")
+                completed_at TEXT, result_status TEXT, result_reason TEXT)""")
+            # Upgrade databases created before durable per-candidate outcomes were added.
+            queue_columns = {row["name"] for row in db.execute("PRAGMA table_info(candidate_queue)").fetchall()}
+            if "result_status" not in queue_columns:
+                db.execute("ALTER TABLE candidate_queue ADD COLUMN result_status TEXT")
+            if "result_reason" not in queue_columns:
+                db.execute("ALTER TABLE candidate_queue ADD COLUMN result_reason TEXT")
 
     def integrity_check(self) -> bool:
         """Return True only when SQLite reports a clean database."""
@@ -266,11 +272,13 @@ class TrackerDatabase:
                 (now.isoformat(), row["address"]))
             return json.loads(row["token_json"])
 
-    def complete_candidate(self, address: str) -> None:
+    def complete_candidate(self, address: str, result_status: str = "", result_reason: str = "") -> None:
+        """Mark work complete while retaining its qualification outcome for diagnostics."""
         with self._connect() as db:
             db.execute("""UPDATE candidate_queue SET status='completed', completed_at=?,
-                claimed_at=NULL, last_error=NULL WHERE address=?""",
-                (datetime.now(timezone.utc).isoformat(), address))
+                claimed_at=NULL, last_error=NULL, result_status=?, result_reason=? WHERE address=?""",
+                (datetime.now(timezone.utc).isoformat(), str(result_status)[:40],
+                 str(result_reason)[:500], address))
 
     def retry_candidate(self, address: str, error: str = "") -> None:
         with self._connect() as db:
@@ -281,6 +289,29 @@ class TrackerDatabase:
     def pending_candidate_count(self) -> int:
         with self._connect() as db:
             return int(db.execute("SELECT COUNT(*) FROM candidate_queue WHERE status!='completed'").fetchone()[0])
+    def queue_diagnostics(self, *, recent_limit: int = 10) -> dict[str, Any]:
+        """Return safe operational counts and recent outcomes from this exact DB."""
+        limit = max(1, min(int(recent_limit), 50))
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT status, COUNT(*) AS total FROM candidate_queue GROUP BY status"
+            ).fetchall()
+            recent = db.execute(
+                """SELECT address, status, attempts, result_status, result_reason,
+                last_error, created_at, completed_at FROM candidate_queue
+                ORDER BY COALESCE(completed_at, created_at) DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+            tracked = int(db.execute("SELECT COUNT(*) FROM tracked_tokens").fetchone()[0])
+        counts = {"pending": 0, "processing": 0, "completed": 0}
+        counts.update({str(row["status"]): int(row["total"]) for row in rows})
+        return {
+            "database_path": str(self.path.resolve()),
+            "tracked_tokens": tracked,
+            "queue_counts": counts,
+            "recent_candidates": [dict(row) for row in recent],
+        }
+
     def record_market_cap(self, address: str, market_cap: float, observed_at: str) -> bool:
         try:
             value = float(market_cap)
