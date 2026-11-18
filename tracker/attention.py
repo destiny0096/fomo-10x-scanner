@@ -3,9 +3,9 @@ from typing import Any
 
 from .narrative import Evidence
 
-MIN_DISTINCT_AUTHORS = 2
-MIN_ENGAGEMENT = 5
-MIN_MATCHING_POSTS = 2
+MIN_DISTINCT_AUTHORS = 1
+MIN_ENGAGEMENT = 1
+MIN_MATCHING_POSTS = 1
 
 
 def _metric(item: dict[str, Any], key: str) -> int:
@@ -17,7 +17,7 @@ def _metric(item: dict[str, Any], key: str) -> int:
 
 
 def check_attention(evidence: list[dict[str, Any]] | None) -> tuple[bool, list[str]]:
-    """Require verifiable Reddit evidence with distinct authors and engagement."""
+    """Require at least one verifiable Reddit post with measurable engagement."""
     valid = []
     for item in evidence or []:
         if not isinstance(item, dict):
@@ -44,6 +44,6 @@ def check_attention(evidence: list[dict[str, Any]] | None) -> tuple[bool, list[s
             for record, authors, engagement, posts in valid
         ]
     return False, [
-        "No verifiable attention threshold met (requires at least 2 distinct authors, "
-        "2 matching posts, and 5 combined score/comments)."
+        "No verifiable attention threshold met (requires at least 1 distinct author, "
+        "1 matching post, and 1 combined score/comment)."
     ]
