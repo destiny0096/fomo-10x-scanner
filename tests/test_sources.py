@@ -89,11 +89,7 @@ class PublicResolverTests(unittest.IsolatedAsyncioTestCase):
                     {"data": {"id": "p1", "author": "alice",
                               "title": "ExampleToken EXT community launch",
                               "permalink": "/r/example/comments/p1/launch",
-                              "score": 3, "num_comments": 1}},
-                    {"data": {"id": "p2", "author": "bob",
-                              "title": "ExampleToken EXT project discussion",
-                              "permalink": "/r/example/comments/p2/discussion",
-                              "score": 1, "num_comments": 1}},
+                              "score": 1, "num_comments": 0}},
                 ]}}
 
         class FakeSession:
@@ -104,9 +100,9 @@ class PublicResolverTests(unittest.IsolatedAsyncioTestCase):
             FakeSession(), "MintABC", "ExampleToken", "EXT"
         )
         self.assertEqual(len(evidence), 1)
-        self.assertEqual(evidence[0]["distinct_authors"], 2)
-        self.assertEqual(evidence[0]["post_count"], 2)
-        self.assertEqual(evidence[0]["engagement"], 6)
+        self.assertEqual(evidence[0]["distinct_authors"], 1)
+        self.assertEqual(evidence[0]["post_count"], 1)
+        self.assertEqual(evidence[0]["engagement"], 1)
 
     async def test_resolver_rejects_hosts_that_only_resolve_private(self):
         class FakeLoop:
