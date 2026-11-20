@@ -596,9 +596,8 @@ async def evaluate_pair(session, pair):
             "name": token.get("name", ""),
             "symbol": token.get("symbol", ""),
             # Pass the same market-cap value used by scanner qualification.
-        # score() may use FDV when DexScreener omits marketCap; keep the
-        # tracker handoff consistent so those alerted candidates are not dropped.
-        "market_cap": mc,
+            # This preserves the scanner's existing marketCap/FDV fallback.
+            "market_cap": mc,
         })
     except Exception:
         logging.exception(
