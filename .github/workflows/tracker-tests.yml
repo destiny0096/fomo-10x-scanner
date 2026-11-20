@@ -3,6 +3,7 @@ name: FOMO Tracker Test 4
 on:
   push:
     branches:
+      - main
       - feature/fomo-tracker-test-4
     paths:
       - 'tracker/**'
