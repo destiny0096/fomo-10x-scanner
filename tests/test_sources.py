@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from tracker.sources import (
     PublicOnlyResolver, _MetaParser, _identity_match, is_safe_project_url,
-    collect_attention_evidence, _get_text,
+    collect_attention_evidence, collect_narrative_evidence, _get_text,
 )
 
 
@@ -15,6 +15,26 @@ class SourceAdapterTests(unittest.TestCase):
         parser.feed('<html><head><title>Example Token</title><meta name="description" content="A community project about art"></head></html>')
         self.assertEqual(parser.description, "A community project about art")
         self.assertEqual(" ".join(parser.title_parts), "Example Token")
+
+    async def test_dexscreener_description_is_used_when_project_site_is_absent(self):
+        payload = {"pairs": [{
+            "chainId": "solana",
+            "url": "https://dexscreener.com/solana/MintABC",
+            "baseToken": {"name": "ExampleToken", "symbol": "EXT"},
+            "info": {"description": "A community project building open tools for independent creators."},
+            "liquidity": {"usd": 10000},
+        }]}
+        with patch("tracker.sources._get_json", new_callable=__import__("unittest").mock.AsyncMock,
+                   return_value=payload):
+            with patch("tracker.sources._get_text", new_callable=__import__("unittest").mock.AsyncMock,
+                       return_value=None):
+                evidence, pair = await collect_narrative_evidence(
+                    object(), "MintABC", "ExampleToken", "EXT"
+                )
+        self.assertEqual(len(evidence), 1)
+        self.assertEqual(evidence[0]["source"], "DexScreener project description")
+        self.assertIn("independent creators", evidence[0]["summary"])
+        self.assertEqual(pair["baseToken"]["symbol"], "EXT")
 
     def test_identity_requires_address_or_name_and_symbol(self):
         self.assertTrue(_identity_match("We are discussing ExampleToken (EXT)", "MintABC", "ExampleToken", "EXT"))
@@ -78,6 +98,37 @@ class PublicResolverTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(records[0]["host"], "8.8.8.8")
 
     async def test_reddit_adapter_returns_measured_distinct_author_metrics(self):
+        class FakeResponse:
+            status = 200
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                return None
+            async def json(self, content_type=None):
+                return {"data": {"children": [
+                    {"data": {"id": "p1", "author": "alice",
+                              "title": "ExampleToken EXT community launch",
+                              "permalink": "/r/example/comments/p1/launch",
+                              "score": 3, "num_comments": 1}},
+                    {"data": {"id": "p2", "author": "bob",
+                              "title": "ExampleToken EXT project discussion",
+                              "permalink": "/r/example/comments/p2/discussion",
+                              "score": 1, "num_comments": 1}},
+                ]}}
+
+        class FakeSession:
+            def get(self, *args, **kwargs):
+                return FakeResponse()
+
+        evidence = await collect_attention_evidence(
+            FakeSession(), "MintABC", "ExampleToken", "EXT"
+        )
+        self.assertEqual(len(evidence), 1)
+        self.assertEqual(evidence[0]["distinct_authors"], 2)
+        self.assertEqual(evidence[0]["post_count"], 2)
+        self.assertEqual(evidence[0]["engagement"], 6)
+
+    async def test_reddit_adapter_accepts_one_verified_post(self):
         class FakeResponse:
             status = 200
             async def __aenter__(self):
