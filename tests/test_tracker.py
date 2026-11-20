@@ -425,6 +425,23 @@ class PersistenceTests(unittest.TestCase):
             db.retry_candidate("QueueFirst", "temporary source outage")
             self.assertEqual(db.claim_next_candidate()["address"], "QueueSecond")
 
+    def test_queue_diagnostics_reports_aggregate_candidate_outcomes(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = TrackerDatabase(Path(d) / "tracker.db")
+            db.enqueue_candidate({"address": "NarrativeRejected", "market_cap": 100})
+            db.enqueue_candidate({"address": "AttentionRejected", "market_cap": 100})
+            db.enqueue_candidate({"address": "StillPending", "market_cap": 100})
+            for address, status in (
+                ("NarrativeRejected", "rejected"),
+                ("AttentionRejected", "rejected"),
+            ):
+                db.claim_next_candidate()
+                db.complete_candidate(address, result_status=status)
+            report = db.queue_diagnostics()
+            self.assertEqual(report["queue_counts"]["completed"], 2)
+            self.assertEqual(report["queue_counts"]["pending"], 1)
+            self.assertEqual(report["outcome_counts"], {"rejected": 2})
+
     def test_candidate_queue_rejects_non_finite_json_market_cap(self):
         with tempfile.TemporaryDirectory() as d:
             db = TrackerDatabase(Path(d) / "tracker.db")
