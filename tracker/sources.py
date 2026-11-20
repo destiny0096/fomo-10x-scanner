@@ -261,7 +261,9 @@ async def collect_attention_evidence(
     min_total_engagement: int = 1,
 ) -> list[dict[str, str]]:
     """Require at least one matching recent Reddit author/post and visible activity."""
-    query = quote(f'"{symbol}"')
+    query_terms = [term for term in (symbol.strip(), name.strip()) if term]
+    query_text = " OR ".join(f'"{term}"' for term in dict.fromkeys(query_terms))
+    query = quote(query_text or f'"{symbol}"')
     payload = await _get_json(session, REDDIT_SEARCH_URL.format(query=query))
     if not payload:
         return []
