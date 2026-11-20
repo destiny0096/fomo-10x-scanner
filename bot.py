@@ -595,9 +595,9 @@ async def evaluate_pair(session, pair):
             "address": address,
             "name": token.get("name", ""),
             "symbol": token.get("symbol", ""),
-            # Pass the same market-cap value used by scanner qualification.
-            # This preserves the scanner's existing marketCap/FDV fallback.
-            "market_cap": mc,
+            # The tracker needs reported marketCap for a valid starting baseline.
+            # Do not substitute FDV: it is not interchangeable with market cap.
+            "market_cap": pair.get("marketCap"),
         })
     except Exception:
         logging.exception(
