@@ -108,6 +108,33 @@ class PublicResolverTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(evidence[0]["post_count"], 2)
         self.assertEqual(evidence[0]["engagement"], 6)
 
+    async def test_reddit_adapter_accepts_one_verified_post(self):
+        class FakeResponse:
+            status = 200
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                return None
+            async def json(self, content_type=None):
+                return {"data": {"children": [
+                    {"data": {"id": "p1", "author": "alice",
+                              "title": "ExampleToken EXT community launch",
+                              "permalink": "/r/example/comments/p1/launch",
+                              "score": 1, "num_comments": 0}},
+                ]}}
+
+        class FakeSession:
+            def get(self, *args, **kwargs):
+                return FakeResponse()
+
+        evidence = await collect_attention_evidence(
+            FakeSession(), "MintABC", "ExampleToken", "EXT"
+        )
+        self.assertEqual(len(evidence), 1)
+        self.assertEqual(evidence[0]["distinct_authors"], 1)
+        self.assertEqual(evidence[0]["post_count"], 1)
+        self.assertEqual(evidence[0]["engagement"], 1)
+
     async def test_resolver_rejects_hosts_that_only_resolve_private(self):
         class FakeLoop:
             async def getaddrinfo(self, host, port, family, type):
