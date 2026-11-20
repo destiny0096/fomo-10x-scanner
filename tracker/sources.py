@@ -228,10 +228,10 @@ async def collect_attention_evidence(
     address: str,
     name: str,
     symbol: str,
-    min_posts: int = 2,
-    min_total_engagement: int = 5,
+    min_posts: int = 1,
+    min_total_engagement: int = 1,
 ) -> list[dict[str, str]]:
-    """Require distinct recent Reddit authors plus visible score/comment activity."""
+    """Require at least one matching recent Reddit author/post and visible activity."""
     query = quote(f'"{symbol}"')
     payload = await _get_json(session, REDDIT_SEARCH_URL.format(query=query))
     if not payload:
