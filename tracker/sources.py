@@ -185,6 +185,19 @@ async def collect_narrative_evidence(
     token_name = token_name or str(base.get("name") or "")
     symbol = symbol or str(base.get("symbol") or "")
     evidence: list[dict[str, str]] = []
+    # DexScreener's public token metadata can contain an actual project
+    # description even when the project has no reachable website. Treat only
+    # that descriptive field as narrative evidence; never promote the token
+    # name, symbol, pair title, or social link into a narrative.
+    dex_description = _clean(str(info.get("description") or ""))
+    dex_url = str(pair.get("url") or f"https://dexscreener.com/solana/{address}")
+    if dex_description and dex_url.startswith("https://"):
+        evidence.append({
+            "source": "DexScreener project description",
+            "url": dex_url,
+            "summary": dex_description[:500],
+            "observed_at": utc_now(),
+        })
     websites = info.get("websites") or []
     for site in websites[:2]:
         url = str(site.get("url") or "") if isinstance(site, dict) else ""
@@ -208,7 +221,6 @@ async def collect_narrative_evidence(
                 "summary": summary[:500],
                 "observed_at": utc_now(),
             })
-    # DexScreener metadata is retained for identity and later price tracking, not treated as narrative proof.
     return evidence, pair
 
 
