@@ -4,8 +4,8 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
-MIN_NARRATIVE_WORDS = 8
-MIN_NARRATIVE_CHARACTERS = 55
+MIN_NARRATIVE_WORDS = 4
+MIN_NARRATIVE_CHARACTERS = 25
 GENERIC_NARRATIVE_PHRASES = (
     "coming soon",
     "website coming soon",
