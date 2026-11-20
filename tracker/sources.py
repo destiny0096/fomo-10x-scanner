@@ -94,24 +94,36 @@ class _MetaParser(HTMLParser):
         super().__init__()
         self.title_parts: list[str] = []
         self.description = ""
+        self.body_parts: list[str] = []
         self._in_title = False
+        self._skip_depth = 0
 
     def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
         attrs = dict(attrs)
-        if tag.lower() == "title":
+        if tag == "title":
             self._in_title = True
-        if tag.lower() == "meta":
+        if tag in {"script", "style", "noscript", "svg"}:
+            self._skip_depth += 1
+        if tag == "meta":
             key = (attrs.get("name") or attrs.get("property") or "").lower()
             if key in {"description", "og:description", "twitter:description"} and not self.description:
                 self.description = _clean(attrs.get("content", ""))
 
     def handle_endtag(self, tag):
-        if tag.lower() == "title":
+        tag = tag.lower()
+        if tag == "title":
             self._in_title = False
+        if tag in {"script", "style", "noscript", "svg"} and self._skip_depth:
+            self._skip_depth -= 1
 
     def handle_data(self, data):
         if self._in_title:
             self.title_parts.append(data)
+        if not self._skip_depth:
+            cleaned = _clean(data)
+            if cleaned:
+                self.body_parts.append(cleaned)
 
 
 async def _get_json(session: aiohttp.ClientSession, url: str) -> dict[str, Any] | None:
@@ -213,7 +225,10 @@ async def collect_narrative_evidence(
             continue
         title = _clean(" ".join(parser.title_parts))
         description = parser.description
-        summary = description
+        # Fall back to visible page copy when metadata is absent. Ignore script,
+        # style, SVG and noscript contents in the parser; cap the evidence text.
+        visible_text = _clean(" ".join(parser.body_parts))
+        summary = description or visible_text
         if summary:
             evidence.append({
                 "source": "Public project website metadata",
@@ -232,7 +247,9 @@ def _identity_match(text: str, address: str, name: str, symbol: str) -> bool:
     symbol = symbol.strip().lower()
     name_match = bool(name and len(name) >= 4 and name in haystack)
     symbol_match = bool(symbol and re.search(rf"(?<![a-z0-9]){re.escape(symbol)}(?![a-z0-9])", haystack))
-    return name_match and symbol_match
+    # Reddit results may refer to a token by its full name OR its ticker.
+    # Address matches remain the strongest identity match.
+    return name_match or symbol_match
 
 
 async def collect_attention_evidence(
