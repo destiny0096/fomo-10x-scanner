@@ -303,12 +303,21 @@ class TrackerDatabase:
                 (limit,),
             ).fetchall()
             tracked = int(db.execute("SELECT COUNT(*) FROM tracked_tokens").fetchone()[0])
+            outcomes = db.execute(
+                """SELECT COALESCE(result_status, 'not_evaluated') AS outcome,
+                COUNT(*) AS total FROM candidate_queue
+                WHERE status='completed' GROUP BY COALESCE(result_status, 'not_evaluated')"""
+            ).fetchall()
         counts = {"pending": 0, "processing": 0, "completed": 0}
         counts.update({str(row["status"]): int(row["total"]) for row in rows})
+        outcome_counts = {
+            str(row["outcome"]): int(row["total"]) for row in outcomes
+        }
         return {
             "database_path": str(self.path.resolve()),
             "tracked_tokens": tracked,
             "queue_counts": counts,
+            "outcome_counts": outcome_counts,
             "recent_candidates": [dict(row) for row in recent],
         }
 
