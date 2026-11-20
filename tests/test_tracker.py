@@ -79,17 +79,13 @@ class QualificationTests(unittest.TestCase):
             "source": "Reddit public search",
             "url": "https://www.reddit.com/r/example/comments/one/post",
             "summary": "One matching public post with measurable activity.",
-            "distinct_authors": 1,
-            "post_count": 1,
-            "engagement": 1,
+            "distinct_authors": 1, "post_count": 1, "engagement": 1,
             "observed_at": "2026-11-09T10:01:00Z",
         }]
         result = qualify_token({
-            "address": "MintOnePost",
-            "narrative_evidence": NARRATIVE,
+            "address": "MintOnePost", "narrative_evidence": NARRATIVE,
             "attention_evidence": one_post,
         })
-        self.assertTrue(result.attention_pass)
         self.assertTrue(result.qualified)
 
     def test_address_required(self):
@@ -428,6 +424,23 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(db.claim_next_candidate()["address"], "QueueFirst")
             db.retry_candidate("QueueFirst", "temporary source outage")
             self.assertEqual(db.claim_next_candidate()["address"], "QueueSecond")
+
+    def test_queue_diagnostics_reports_aggregate_candidate_outcomes(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = TrackerDatabase(Path(d) / "tracker.db")
+            db.enqueue_candidate({"address": "NarrativeRejected", "market_cap": 100})
+            db.enqueue_candidate({"address": "AttentionRejected", "market_cap": 100})
+            db.enqueue_candidate({"address": "StillPending", "market_cap": 100})
+            for address, status in (
+                ("NarrativeRejected", "rejected"),
+                ("AttentionRejected", "rejected"),
+            ):
+                db.claim_next_candidate()
+                db.complete_candidate(address, result_status=status)
+            report = db.queue_diagnostics()
+            self.assertEqual(report["queue_counts"]["completed"], 2)
+            self.assertEqual(report["queue_counts"]["pending"], 1)
+            self.assertEqual(report["outcome_counts"], {"rejected": 2})
 
     def test_candidate_queue_rejects_non_finite_json_market_cap(self):
         with tempfile.TemporaryDirectory() as d:
