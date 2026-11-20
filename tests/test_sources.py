@@ -36,11 +36,20 @@ class SourceAdapterTests(unittest.TestCase):
         self.assertIn("independent creators", evidence[0]["summary"])
         self.assertEqual(pair["baseToken"]["symbol"], "EXT")
 
-    def test_identity_requires_address_or_name_and_symbol(self):
+    def test_identity_accepts_address_name_or_symbol(self):
         self.assertTrue(_identity_match("We are discussing ExampleToken (EXT)", "MintABC", "ExampleToken", "EXT"))
         self.assertTrue(_identity_match("MintABC is trending", "MintABC", "ExampleToken", "EXT"))
-        self.assertFalse(_identity_match("EXT is trending", "MintABC", "ExampleToken", "EXT"))
+        self.assertTrue(_identity_match("EXT is trending", "MintABC", "ExampleToken", "EXT"))
+        self.assertTrue(_identity_match("ExampleToken is trending", "MintABC", "ExampleToken", "EXT"))
         self.assertFalse(_identity_match("Another project has a similar name", "MintABC", "ExampleToken", "EXT"))
+
+    def test_parser_extracts_visible_body_copy_without_script_or_style(self):
+        parser = _MetaParser()
+        parser.feed("<html><head><style>fake narrative</style><script>bad content</script></head><body><h1>Project</h1><p>Building open tools for artists and independent communities.</p></body></html>")
+        text = " ".join(parser.body_parts)
+        self.assertIn("Building open tools", text)
+        self.assertNotIn("fake narrative", text)
+        self.assertNotIn("bad content", text)
 
     def test_project_site_url_must_be_safe_https(self):
         self.assertTrue(is_safe_project_url("https://example.org/about"))
