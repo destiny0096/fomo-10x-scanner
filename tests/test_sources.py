@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from tracker.sources import (
     PublicOnlyResolver, _MetaParser, _identity_match, is_safe_project_url,
-    collect_attention_evidence, _get_text,
+    collect_attention_evidence, collect_narrative_evidence, _get_text,
 )
 
 
@@ -15,6 +15,26 @@ class SourceAdapterTests(unittest.TestCase):
         parser.feed('<html><head><title>Example Token</title><meta name="description" content="A community project about art"></head></html>')
         self.assertEqual(parser.description, "A community project about art")
         self.assertEqual(" ".join(parser.title_parts), "Example Token")
+
+    async def test_dexscreener_description_is_used_when_project_site_is_absent(self):
+        payload = {"pairs": [{
+            "chainId": "solana",
+            "url": "https://dexscreener.com/solana/MintABC",
+            "baseToken": {"name": "ExampleToken", "symbol": "EXT"},
+            "info": {"description": "A community project building open tools for independent creators."},
+            "liquidity": {"usd": 10000},
+        }]}
+        with patch("tracker.sources._get_json", new_callable=__import__("unittest").mock.AsyncMock,
+                   return_value=payload):
+            with patch("tracker.sources._get_text", new_callable=__import__("unittest").mock.AsyncMock,
+                       return_value=None):
+                evidence, pair = await collect_narrative_evidence(
+                    object(), "MintABC", "ExampleToken", "EXT"
+                )
+        self.assertEqual(len(evidence), 1)
+        self.assertEqual(evidence[0]["source"], "DexScreener project description")
+        self.assertIn("independent creators", evidence[0]["summary"])
+        self.assertEqual(pair["baseToken"]["symbol"], "EXT")
 
     def test_identity_requires_address_or_name_and_symbol(self):
         self.assertTrue(_identity_match("We are discussing ExampleToken (EXT)", "MintABC", "ExampleToken", "EXT"))
