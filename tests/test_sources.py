@@ -153,12 +153,18 @@ class PublicResolverTests(unittest.IsolatedAsyncioTestCase):
                 ]}}
 
         class FakeSession:
-            def get(self, *args, **kwargs):
+            last_url = ""
+            def get(self, url, *args, **kwargs):
+                self.last_url = url
                 return FakeResponse()
 
+        session = FakeSession()
         evidence = await collect_attention_evidence(
-            FakeSession(), "MintABC", "ExampleToken", "EXT"
+            session, "MintABC", "ExampleToken", "EXT"
         )
+        self.assertIn("ExampleToken", session.last_url)
+        self.assertIn("EXT", session.last_url)
+        self.assertIn("OR", session.last_url)
         self.assertEqual(len(evidence), 1)
         self.assertEqual(evidence[0]["distinct_authors"], 1)
         self.assertEqual(evidence[0]["post_count"], 1)
