@@ -20,11 +20,13 @@ def _log_queue_diagnostics(database: TrackerDatabase, context: str) -> None:
     try:
         report = database.queue_diagnostics(recent_limit=8)
         counts = report["queue_counts"]
+        outcomes = report.get("outcome_counts", {})
         logger.info(
             "Tracker diagnostics (%s): db=%s qualified=%s queue_pending=%s "
-            "queue_processing=%s queue_completed=%s",
+            "queue_processing=%s queue_completed=%s outcomes=%s",
             context, report["database_path"], report["tracked_tokens"],
-            counts.get("pending", 0), counts.get("processing", 0), counts.get("completed", 0),
+            counts.get("pending", 0), counts.get("processing", 0),
+            counts.get("completed", 0), outcomes,
         )
         for item in report["recent_candidates"]:
             outcome = item.get("result_status") or item.get("last_error") or item.get("status")
