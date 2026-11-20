@@ -41,7 +41,7 @@ class QualificationTests(unittest.TestCase):
             "narrative_evidence": short_description,
             "attention_evidence": ATTENTION,
         })
-        self.assertFalse(result.narrative_pass)
+        self.assertTrue(result.narrative_pass)
 
         sufficient_description = [{
             "source": "Project website", "url": "https://example.org",
@@ -73,6 +73,20 @@ class QualificationTests(unittest.TestCase):
         self.assertFalse(result.qualified)
         self.assertTrue(result.narrative_pass)
         self.assertFalse(result.attention_pass)
+
+    def test_reduced_attention_threshold_accepts_one_verified_post(self):
+        one_post = [{
+            "source": "Reddit public search",
+            "url": "https://www.reddit.com/r/example/comments/one/post",
+            "summary": "One matching public post with measurable activity.",
+            "distinct_authors": 1, "post_count": 1, "engagement": 1,
+            "observed_at": "2026-11-09T10:01:00Z",
+        }]
+        result = qualify_token({
+            "address": "MintOnePost", "narrative_evidence": NARRATIVE,
+            "attention_evidence": one_post,
+        })
+        self.assertTrue(result.qualified)
 
     def test_address_required(self):
         self.assertFalse(qualify_token({"narrative_evidence":NARRATIVE,"attention_evidence":ATTENTION}).qualified)
