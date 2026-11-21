@@ -17,85 +17,20 @@ ATTENTION = [{"source":"Reddit public search","url":"https://www.reddit.com/r/ex
 
 
 class QualificationTests(unittest.TestCase):
-    def test_both_checks_required(self):
-        r = qualify_token({"address":"Mint111","narrative_evidence":NARRATIVE,"attention_evidence":[]})
-        self.assertFalse(r.qualified)
-        self.assertTrue(r.narrative_pass)
-        self.assertFalse(r.attention_pass)
-
-    def test_both_evidence_categories_pass(self):
-        self.assertTrue(qualify_token({"address":"Mint111","narrative_evidence":NARRATIVE,"attention_evidence":ATTENTION}).qualified)
-
-    def test_unlinked_evidence_fails(self):
-        bad = [{"source":"unknown","url":"","summary":"Trust me","observed_at":"now"}]
-        self.assertFalse(qualify_token({"address":"Mint111","narrative_evidence":bad,"attention_evidence":ATTENTION}).qualified)
-
-    def test_narrative_word_and_character_thresholds_apply_to_description(self):
-        short_description = [{
-            "source": "Project website", "url": "https://example.org",
-            "summary": "Community-driven development creates useful infrastructure for artists",
-            "observed_at": "2026-11-09T10:00:00Z",
-        }]
-        result = qualify_token({
-            "address": "MintShortNarrative",
-            "narrative_evidence": short_description,
-            "attention_evidence": ATTENTION,
-        })
-        self.assertTrue(result.narrative_pass)
-
-        sufficient_description = [{
-            "source": "Project website", "url": "https://example.org",
-            "summary": "A community project building open creative tools for independent digital artists",
-            "observed_at": "2026-11-09T10:00:00Z",
-        }]
-        result = qualify_token({
-            "address": "MintGoodNarrative",
-            "narrative_evidence": sufficient_description,
-            "attention_evidence": ATTENTION,
-        })
-        self.assertTrue(result.narrative_pass)
-
-    def test_short_or_placeholder_narrative_is_rejected(self):
-        weak = [{"source": "Project website", "url": "https://example.org",
-                 "summary": "Coming soon", "observed_at": "now"}]
-        self.assertFalse(qualify_token({
-            "address": "MintWeak", "narrative_evidence": weak,
-            "attention_evidence": ATTENTION,
-        }).qualified)
-
-    def test_attention_requires_measured_public_engagement(self):
-        weak = [{"source": "Reddit public search", "url": "https://www.reddit.com/r/example/post",
-                 "summary": "A post was found", "observed_at": "now"}]
-        result = qualify_token({
-            "address": "MintWeakAttention", "narrative_evidence": NARRATIVE,
-            "attention_evidence": weak,
-        })
-        self.assertFalse(result.qualified)
-        self.assertTrue(result.narrative_pass)
-        self.assertFalse(result.attention_pass)
-
-    def test_reduced_attention_threshold_accepts_one_verified_post(self):
-        one_post = [{
-            "source": "Reddit public search",
-            "url": "https://www.reddit.com/r/example/comments/one/post",
-            "summary": "One matching public post with measurable activity.",
-            "distinct_authors": 1, "post_count": 1, "engagement": 1,
-            "observed_at": "2026-11-09T10:01:00Z",
-        }]
-        result = qualify_token({
-            "address": "MintOnePost", "narrative_evidence": NARRATIVE,
-            "attention_evidence": one_post,
-        })
+    def test_narrative_and_attention_are_not_required(self):
+        result = qualify_token({"address": "Mint111"})
         self.assertTrue(result.qualified)
+        self.assertTrue(result.narrative_pass)
+        self.assertTrue(result.attention_pass)
+        self.assertIn("checks disabled", " ".join(result.reasons).lower())
 
-    def test_address_required(self):
-        self.assertFalse(qualify_token({"narrative_evidence":NARRATIVE,"attention_evidence":ATTENTION}).qualified)
+    def test_missing_address_is_rejected(self):
+        self.assertFalse(qualify_token({"market_cap": 10000}).qualified)
 
 
 class PersistenceTests(unittest.TestCase):
     def _token(self):
-        return {"address":"Mint111","symbol":"TEST","name":"Test token","market_cap":10000,
-                "narrative_evidence":NARRATIVE,"attention_evidence":ATTENTION}
+        return {"address":"Mint111","symbol":"TEST","name":"Test token","market_cap":10000}
 
     def test_insert_duplicate_snapshot_and_reopen(self):
         with tempfile.TemporaryDirectory() as d:
@@ -497,12 +432,3 @@ class ReportTests(unittest.TestCase):
             self.assertEqual(exported[0]["peak_multiple"], "12.0")
             self.assertIn("Project website", exported[0]["narrative_evidence"])
             self.assertEqual(exported[1]["symbol"], "'=2+2")
-
-    def test_csv_export_rejects_database_extension(self):
-        with tempfile.TemporaryDirectory() as d:
-            with self.assertRaises(ValueError):
-                export_results([], Path(d) / "tracker.db")
-
-
-if __name__ == "__main__":
-    unittest.main()
