@@ -12,12 +12,9 @@ class QualificationResult:
 
 
 def qualify_token(token: dict[str, Any]) -> QualificationResult:
-    """Narrative and attention are disabled for this test; address is the sole gate."""
+    """Accept any candidate with a non-empty mint address; no other gates."""
     address = str(token.get("address", "")).strip()
     passed = bool(address)
-    reasons = [] if passed else ["Missing token address."]
-    reasons.append("QUALIFIED: narrative and attention checks disabled for Test 4." if passed
-                  else "REJECTED: missing token address.")
-    # Pass flags remain True for compatibility with older diagnostic consumers;
-    # these checks are intentionally not evaluated or required in this test.
-    return QualificationResult(passed, True, True, tuple(reasons))
+    reasons = ("Accepted: mint address present.",) if passed else ("Rejected: missing mint address.",)
+    # Legacy fields retained for compatibility. These are not checks.
+    return QualificationResult(passed, True, True, reasons)
