@@ -1,8 +1,7 @@
-"""Pure qualification engine for FOMO 10X Tracker Test 4."""
+"""Address-only qualification for the FOMO 10X Tracker Test 4 cohort."""
 from dataclasses import dataclass
 from typing import Any
-from .attention import check_attention
-from .narrative import check_narrative
+
 
 @dataclass(frozen=True)
 class QualificationResult:
@@ -11,13 +10,14 @@ class QualificationResult:
     attention_pass: bool
     reasons: tuple[str, ...]
 
+
 def qualify_token(token: dict[str, Any]) -> QualificationResult:
-    narrative_ok, nr = check_narrative(token.get("narrative_evidence"))
-    attention_ok, ar = check_attention(token.get("attention_evidence"))
+    """Narrative and attention are disabled for this test; address is the sole gate."""
     address = str(token.get("address", "")).strip()
-    reasons = list(nr + ar)
-    if not address:
-        reasons.append("Missing token address.")
-    passed = bool(address and narrative_ok and attention_ok)
-    reasons.append("QUALIFIED: both mandatory checks passed." if passed else "REJECTED: token did not pass every mandatory check.")
-    return QualificationResult(passed, narrative_ok, attention_ok, tuple(reasons))
+    passed = bool(address)
+    reasons = [] if passed else ["Missing token address."]
+    reasons.append("QUALIFIED: narrative and attention checks disabled for Test 4." if passed
+                  else "REJECTED: missing token address.")
+    # Pass flags remain True for compatibility with older diagnostic consumers;
+    # these checks are intentionally not evaluated or required in this test.
+    return QualificationResult(passed, True, True, tuple(reasons))
