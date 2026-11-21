@@ -132,7 +132,8 @@ class PersistenceTests(unittest.TestCase):
             live = Path(d) / "live.db"
             backup = Path(d) / "backup.db"
             original = TrackerDatabase(live)
-            original.add_qualified(self._token(), "2026-11-09T10:00:00Z")            original.record_market_cap("Mint111", 42000, "2026-11-09T11:00:00Z")
+            original.add_qualified(self._token(), "2026-11-09T10:00:00Z")
+            original.record_market_cap("Mint111", 42000, "2026-11-09T11:00:00Z")
             original.backup_to(backup)
             live.unlink()
 
@@ -331,7 +332,8 @@ class PersistenceTests(unittest.TestCase):
             db = TrackerDatabase(path)
             db.enqueue_candidate({"address": "QueueDone", "market_cap": 100})
             self.assertEqual(db.claim_next_candidate()["address"], "QueueDone")
-            db.complete_candidate("QueueDone")            reopened = TrackerDatabase(path)
+            db.complete_candidate("QueueDone")
+            reopened = TrackerDatabase(path)
             self.assertEqual(reopened.pending_candidate_count(), 0)
             self.assertIsNone(reopened.claim_next_candidate())
 
