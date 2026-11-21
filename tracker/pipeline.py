@@ -1,20 +1,20 @@
-"""Orchestrate address/market-cap qualification and durable cohort recording.\nNarrative and Reddit attention collection are intentionally bypassed for Tracker Test 4.Scanner alerts already pass scanner-side qualification; this component records them
-when address and valid starting market-cap data are present."""
+"""Orchestrate address/market-cap qualification and durable cohort recording.
+Narrative and Reddit attention collection are intentionally bypassed for Tracker Test 4.
+Scanner alerts already pass scanner-side qualification; this component records them
+when address and valid starting market-cap data are present.
+"""
 from __future__ import annotations
 
 from datetime import datetime, timezone
 import math
 from typing import Any
 
-
 from .database import TrackerDatabase
 from .tracker import QualificationResult, qualify_token
 
 
-
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
+    return datetime.now(timezone.utc)
 
 
 async def evaluate_and_record(
@@ -23,7 +23,6 @@ async def evaluate_and_record(
     evidence_collector: Any = None,  # retained for backwards-compatible call sites; deliberately unused
 ) -> dict[str, Any]:
     """Record candidates with an address and positive finite starting market cap.
-
 
     No narrative, attention, Reddit, or website checks are performed.
     """
@@ -38,15 +37,31 @@ async def evaluate_and_record(
     if not math.isfinite(market_cap) or market_cap <= 0:
         return {"status": "rejected", "reason": "Missing or invalid starting market cap.", "qualification": None}
 
-    candidate = {**token, "address": address, "market_cap": market_cap,
-                 "narrative_evidence": [], "attention_evidence": []}
+    candidate = {
+        **token,
+        "address": address,
+        "market_cap": market_cap,
+        "narrative_evidence": [],
+        "attention_evidence": [],
+    }
     qualification: QualificationResult = qualify_token(candidate)
     if not qualification.qualified:
-        return {"status": "rejected", "reason": " ".join(qualification.reasons),
-                "qualification": qualification}
+        return {
+            "status": "rejected",
+            "reason": " ".join(qualification.reasons),
+            "qualification": qualification,
+        }
 
     db = database or TrackerDatabase()
-    result = db.add_qualified(candidate, _utc_now())
-    status_map = {"added": "qualified", "duplicate": "duplicate", "full": "tracker_full", "invalid": "rejected"}
-    return {"status": status_map.get(result, "storage_error"),
-            "reason": " ".join(qualification.reasons), "qualification": qualification}
+    result = db.add_qualified(candidate, _utc_now().isoformat())
+    status_map = {
+        "added": "qualified",
+        "duplicate": "duplicate",
+        "full": "tracker_full",
+        "invalid": "rejected",
+    }
+    return {
+        "status": status_map.get(result, "storage_error"),
+        "reason": " ".join(qualification.reasons),
+        "qualification": qualification,
+    }
