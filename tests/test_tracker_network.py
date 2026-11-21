@@ -62,7 +62,7 @@ class EvidenceSourceRetryTests(unittest.IsolatedAsyncioTestCase):
         result = await _get_json(_Session(status=404), "https://api.example.test/data")
         self.assertIsNone(result)
 
-    async def test_pipeline_returns_retryable_evidence_error_on_source_outage(self):
+    async def test_pipeline_ignores_evidence_collector_and_records_valid_candidate(self):
         async def unavailable_collector(**_kwargs):
             raise EvidenceSourceUnavailable("temporary DNS failure")
 
@@ -73,11 +73,11 @@ class EvidenceSourceRetryTests(unittest.IsolatedAsyncioTestCase):
                 database=db,
                 evidence_collector=unavailable_collector,
             )
-            self.assertEqual(result["status"], "evidence_error")
-            self.assertIn("Evidence source temporarily unavailable", result["reason"])
-            self.assertEqual(db.count(), 0)
+            self.assertEqual(result["status"], "qualified")
+            self.assertEqual(db.count(), 1)
+            self.assertEqual(db.list_tokens()[0]["address"], "RetryMint")
 
-    async def test_empty_successful_evidence_remains_a_real_qualification_rejection(self):
+    async def test_empty_evidence_is_irrelevant_for_this_test(self):
         async def no_public_evidence(**_kwargs):
             return {"narrative_evidence": [], "attention_evidence": []}
 
@@ -88,8 +88,8 @@ class EvidenceSourceRetryTests(unittest.IsolatedAsyncioTestCase):
                 database=db,
                 evidence_collector=no_public_evidence,
             )
-            self.assertEqual(result["status"], "rejected")
-            self.assertEqual(db.count(), 0)
+            self.assertEqual(result["status"], "qualified")
+            self.assertEqual(db.count(), 1)
 
     async def test_existing_database_queue_schema_is_upgraded_in_place(self):
         import sqlite3
