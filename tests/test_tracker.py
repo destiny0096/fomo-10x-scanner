@@ -27,6 +27,7 @@ class QualificationTests(unittest.TestCase):
     def test_missing_address_is_rejected(self):
         self.assertFalse(qualify_token({"market_cap": 10000}).qualified)
 
+
 class PersistenceTests(unittest.TestCase):
     def _token(self):
         return {"address":"Mint111","symbol":"TEST","name":"Test token","market_cap":10000}
