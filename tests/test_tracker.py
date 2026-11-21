@@ -32,7 +32,8 @@ class PersistenceTests(unittest.TestCase):
     def _token(self):
         return {"address":"Mint111","symbol":"TEST","name":"Test token","market_cap":10000}
 
-    def test_insert_duplicate_snapshot_and_reopen(self):        with tempfile.TemporaryDirectory() as d:
+    def test_insert_duplicate_snapshot_and_reopen(self):
+        with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "nested" / "test.db"
             db = TrackerDatabase(path)
             token = self._token()
@@ -230,7 +231,8 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(len(events[-1]["tokens"]), 100)
             self.assertEqual(db.pending_notification_count(), 0)
 
-    def test_concurrent_qualifications_cannot_skip_the_25_token_milestone(self):        from concurrent.futures import ThreadPoolExecutor
+    def test_concurrent_qualifications_cannot_skip_the_25_token_milestone(self):
+        from concurrent.futures import ThreadPoolExecutor
 
         with tempfile.TemporaryDirectory() as d:
             db = TrackerDatabase(Path(d) / "tracker.db")
