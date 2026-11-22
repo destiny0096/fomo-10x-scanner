@@ -314,7 +314,6 @@ def alert(
         f"📈 5m Momentum: {momentum:+.2f}%\n"
         f"⭐ Score: {total_score}/100\n"
         f"📌 Signals: {', '.join(reasons)}\n\n"
-        "⚠️ Screening only — NOT a 10× guarantee.\n\n"
         f"CA: {address}\n"
         f"🔗 {dex_url}"
     )
