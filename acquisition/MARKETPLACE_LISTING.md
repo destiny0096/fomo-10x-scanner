@@ -2,7 +2,7 @@
 
 ## Solana Meme-Coin Discovery & Telegram Alert Software
 
-**Asking price: USD $2,000**  
+**Asking price: USD $3,000**  
 **Negotiable for serious buyers**
 
 ### Acquire an existing Solana-focused software project
@@ -79,7 +79,7 @@ The final purchase agreement will define the exact assets transferred, handover 
 
 ### Price and enquiries
 
-**Asking price: USD $2,000**  
+**Asking price: USD $3,000**  
 Serious offers are welcome.
 
 Contact the seller to discuss the acquisition and arrange a technical walkthrough.
