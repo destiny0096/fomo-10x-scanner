@@ -6,7 +6,7 @@ FOMO 10X Scanner is a Python-based Solana token-discovery and Telegram-alert app
 
 The project brings together market data, token activity analysis, security checks, liquidity assessment, sell-route evaluation and Telegram notifications. It also includes a separate tracker component that provides a foundation for recording token cohorts and monitoring their market-cap performance.
 
-**Asking price: USD 2,000**  
+**Asking price: USD 3,000**  
 **Serious offers are welcome.**
 
 ## Why this project is interesting
