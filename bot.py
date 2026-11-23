@@ -131,7 +131,8 @@ async def get(session, path, params=None):
         return data
 
 
-async def tg(session, message):
+async def send_telegram_message(session, chat_id, message):
+    """Send a Telegram message to the supplied chat."""
     url = (
         "https://api.telegram.org/"
         f"bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -140,22 +141,117 @@ async def tg(session, message):
     async with session.post(
         url,
         json={
-            "chat_id": TELEGRAM_CHAT_ID,
+            "chat_id": chat_id,
             "text": message,
             "disable_web_page_preview": False,
         },
         timeout=20,
     ) as response:
 
-        if response.status >= 400:
-            raise RuntimeError(await response.text())
-
         result = await response.json()
 
-        if not result.get("ok"):
+        if response.status >= 400 or not result.get("ok"):
             raise RuntimeError(
-                f"Telegram rejected message: {result}"
+                f"Telegram sendMessage failed ({response.status}): {result}"
             )
+
+
+async def tg(session, message):
+    # Preserve the existing scanner-alert destination.
+    await send_telegram_message(session, TELEGRAM_CHAT_ID, message)
+
+
+def telegram_command_response(text):
+    """Return a reply for supported bot commands, otherwise None."""
+    if not text:
+        return None
+
+    command = text.strip().split(maxsplit=1)[0].lower()
+    command = command.split("@", 1)[0]
+
+    if command == "/start":
+        return (
+            "Welcome to FOMO 10X Scanner! 🚀\\n\\n"
+            "This bot delivers automated Solana memecoin watch alerts. "
+            "It monitors market cap, liquidity, trading volume, buying "
+            "pressure, momentum and token security.\\n\\n"
+            "When a token meets the scanner's filters, an alert is sent "
+            "with its market data and security checks.\\n\\n"
+            "Use /help to see what this bot does. "
+            "This is an alert and research tool, not an exchange or "
+            "guarantee of trading results."
+        )
+
+    if command == "/help":
+        return (
+            "FOMO 10X Scanner — Help\\n\\n"
+            "The bot automatically sends filtered Solana token alerts. "
+            "Alerts include market cap, liquidity, 24-hour volume, "
+            "buying pressure, 5-minute momentum, scanner score, "
+            "token security, liquidity-pool status and sell-route checks.\\n\\n"
+            "There are no manual trading or buy/sell commands."
+        )
+
+    return None
+
+
+async def telegram_command_listener(session):
+    """Poll Telegram updates and answer /start and /help commands."""
+    updates_url = (
+        "https://api.telegram.org/"
+        f"bot{TELEGRAM_BOT_TOKEN}/getUpdates"
+    )
+    offset = None
+
+    while True:
+        try:
+            params = {"timeout": 25}
+            if offset is not None:
+                params["offset"] = offset
+
+            async with session.get(
+                updates_url,
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=35),
+            ) as response:
+                payload = await response.json()
+
+                if response.status >= 400 or not payload.get("ok"):
+                    # A configured webhook prevents getUpdates polling.
+                    # Do not silently delete or replace an existing webhook.
+                    logging.error(
+                        "Telegram command polling failed (%s): %s",
+                        response.status,
+                        payload,
+                    )
+                    await asyncio.sleep(5)
+                    continue
+
+            for update in payload.get("result", []):
+                offset = max(offset or 0, int(update["update_id"]) + 1)
+
+                message = update.get("message") or update.get("edited_message")
+                if not message:
+                    continue
+
+                chat = message.get("chat") or {}
+                chat_id = chat.get("id")
+                reply = telegram_command_response(message.get("text", ""))
+
+                if chat_id is not None and reply:
+                    await send_telegram_message(session, chat_id, reply)
+                    logging.info(
+                        "Answered Telegram command in chat %s",
+                        chat_id,
+                    )
+
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.exception(
+                "Telegram command listener failed; retrying shortly"
+            )
+            await asyncio.sleep(5)
 
 
 # ============================================================
@@ -706,6 +802,7 @@ async def main():
 
 async def run():
     runner = await start_health_server()
+    command_listener_task = None
     try:
         # Retry durable milestone notifications left pending by a previous
         # shutdown or Telegram outage. Delivery failure must not stop scanning.
@@ -728,9 +825,21 @@ async def run():
             name="fomo-tracker-market-cap-monitor",
         )
 
+        command_listener_task = asyncio.create_task(
+            telegram_command_listener(session),
+            name="fomo-telegram-command-listener",
+        )
+
         try:
             await main()
         finally:
+            if command_listener_task is not None:
+                command_listener_task.cancel()
+                try:
+                    await command_listener_task
+                except asyncio.CancelledError:
+                    pass
+
             tracker_task.cancel()
             try:
                 await tracker_task
