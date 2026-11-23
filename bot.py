@@ -785,20 +785,27 @@ async def main():
     async with aiohttp.ClientSession(
         timeout=timeout,
     ) as session:
+        command_listener_task = asyncio.create_task(
+            telegram_command_listener(session),
+            name="fomo-telegram-command-listener",
+        )
 
-        while True:
+        try:
+            while True:
+                try:
+                    await scan(session)
+                except Exception:
+                    logging.exception(
+                        "Scan failed; will retry next cycle"
+                    )
 
+                await asyncio.sleep(POLL_SECONDS)
+        finally:
+            command_listener_task.cancel()
             try:
-                await scan(session)
-
-            except Exception:
-                logging.exception(
-                    "Scan failed; will retry next cycle"
-                )
-
-            await asyncio.sleep(
-                POLL_SECONDS
-            )
+                await command_listener_task
+            except asyncio.CancelledError:
+                pass
 
 
 async def run():
@@ -826,21 +833,9 @@ async def run():
             name="fomo-tracker-market-cap-monitor",
         )
 
-        command_listener_task = asyncio.create_task(
-            telegram_command_listener(session),
-            name="fomo-telegram-command-listener",
-        )
-
         try:
             await main()
         finally:
-            if command_listener_task is not None:
-                command_listener_task.cancel()
-                try:
-                    await command_listener_task
-                except asyncio.CancelledError:
-                    pass
-
             tracker_task.cancel()
             try:
                 await tracker_task
