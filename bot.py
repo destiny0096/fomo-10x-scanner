@@ -228,22 +228,23 @@ async def telegram_command_listener(session):
                     continue
 
             for update in payload.get("result", []):
-                offset = max(offset or 0, int(update["update_id"]) + 1)
-
                 message = update.get("message") or update.get("edited_message")
-                if not message:
-                    continue
 
-                chat = message.get("chat") or {}
-                chat_id = chat.get("id")
-                reply = telegram_command_response(message.get("text", ""))
+                if message:
+                    chat = message.get("chat") or {}
+                    chat_id = chat.get("id")
+                    reply = telegram_command_response(message.get("text", ""))
 
-                if chat_id is not None and reply:
-                    await send_telegram_message(session, chat_id, reply)
-                    logging.info(
-                        "Answered Telegram command in chat %s",
-                        chat_id,
-                    )
+                    if chat_id is not None and reply:
+                        await send_telegram_message(session, chat_id, reply)
+                        logging.info(
+                            "Answered Telegram command in chat %s",
+                            chat_id,
+                        )
+
+                # Advance only after handling this update so a failed reply
+                # can be retried instead of silently skipped.
+                offset = max(offset or 0, int(update["update_id"]) + 1)
 
         except asyncio.CancelledError:
             raise
