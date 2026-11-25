@@ -390,6 +390,33 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(db.pending_candidate_count(), 0)
 
 
+    def test_explicit_test4_reset_backs_up_and_starts_clean_test5_once(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "tracker.db"
+            db = TrackerDatabase(path)
+            for index in range(100):
+                token = self._token()
+                token["address"] = "Test4Mint" + str(index)
+                self.assertEqual(db.add_qualified(token, "2026-11-09T10:00:00Z"), "added")
+            db.record_market_cap("Test4Mint0", 20000, "2026-11-09T11:00:00Z")
+            db.enqueue_candidate({"address": "OldQueuedMint", "market_cap": 10000})
+            self.assertTrue(db.reset_test4_to_test5())
+            reopened = TrackerDatabase(path)
+            self.assertEqual(reopened.current_test_number(), 5)
+            self.assertEqual(reopened.count(), 0)
+            self.assertEqual(reopened.pending_candidate_count(), 0)
+            self.assertFalse(reopened.reset_test4_to_test5())
+            self.assertTrue(reopened.integrity_check())
+            backups = list((Path(d) / "tracker_backups").glob("tracker-before-test5-reset-*.db"))
+            self.assertEqual(len(backups), 1)
+            backup = TrackerDatabase(backups[0])
+            self.assertEqual(backup.current_test_number(), 4)
+            self.assertEqual(backup.count(), 100)
+            with reopened._connect() as connection:
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM completed_cohorts WHERE test_number=4").fetchone()[0], 0)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM tracked_tokens WHERE test_number=4").fetchone()[0], 0)
+
+
 class ReportTests(unittest.TestCase):
     def test_performance_report(self):
         rows = [{"symbol":"A","address":"MintA","initial_mc":100,"peak_mc":1200}]
