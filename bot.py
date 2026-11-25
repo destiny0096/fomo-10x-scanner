@@ -173,12 +173,12 @@ def telegram_command_response(text):
 
     if command == "/start":
         return (
-            "Welcome to FOMO 10X Scanner! 🚀\\n\\n"
+            "Welcome to FOMO 10X Scanner! 🚀\n\n"
             "This bot delivers automated Solana memecoin watch alerts. "
             "It monitors market cap, liquidity, trading volume, buying "
-            "pressure, momentum and token security.\\n\\n"
+            "pressure, momentum and token security.\n\n"
             "When a token meets the scanner's filters, an alert is sent "
-            "with its market data and security checks.\\n\\n"
+            "with its market data and security checks.\n\n"
             "Use /help to see what this bot does. "
             "This is an alert and research tool, not an exchange or "
             "guarantee of trading results."
@@ -186,11 +186,11 @@ def telegram_command_response(text):
 
     if command == "/help":
         return (
-            "FOMO 10X Scanner — Help\\n\\n"
+            "FOMO 10X Scanner — Help\n\n"
             "The bot automatically sends filtered Solana token alerts. "
             "Alerts include market cap, liquidity, 24-hour volume, "
             "buying pressure, 5-minute momentum, scanner score, "
-            "token security, liquidity-pool status and sell-route checks.\\n\\n"
+            "token security, liquidity-pool status and sell-route checks.\n\n"
             "There are no manual trading or buy/sell commands."
         )
 
@@ -678,11 +678,11 @@ async def evaluate_pair(session, pair):
     qualified_token = evidence_result["candidate"]
     narrative_lines = qualified_token.get("narrative_evidence") or []
     attention_lines = qualified_token.get("attention_evidence") or []
-    narrative_text = "\\n".join(
+    narrative_text = "\n".join(
         f"• {item.get('source', 'Source')}: {item.get('summary', '')}"
         for item in narrative_lines if isinstance(item, dict)
     )
-    attention_text = "\\n".join(
+    attention_text = "\n".join(
         f"• {item.get('source', 'Source')}: {item.get('summary', '')}"
         for item in attention_lines if isinstance(item, dict)
     )
@@ -698,15 +698,15 @@ async def evaluate_pair(session, pair):
             momentum,
             buy_pressure,
         )
-        + "\\n\\n🧠 NARRATIVE CHECK — PASS\\n"
+        + "\n\n🧠 NARRATIVE CHECK — PASS\n"
         + narrative_text
-        + "\\n\\n👀 ATTENTION CHECK — PASS\\n"
+        + "\n\n👀 ATTENTION CHECK — PASS\n"
         + attention_text
-        + "\\n\\n🛡️ SECURITY\\n"
+        + "\n\n🛡️ SECURITY\n"
         + security_summary(security)
-        + "\\n\\n"
+        + "\n\n"
         + lp_status_text(lp_status)
-        + "\\n\\n"
+        + "\n\n"
         + sell_route_text(sell_status)
     )
 
