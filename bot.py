@@ -44,7 +44,7 @@ POLL_SECONDS = max(
 )
 
 # getUpdates permits only one active long-polling consumer per bot token.
-# Keep command polling opt-in so the scanner can run safely alongside deployments.
+# Keep /start and /help enabled for the public bot presentation. The scanner GitHub Actions workflow is manual-only to avoid a second production poller.
 ENABLE_TELEGRAM_COMMAND_POLLING = (
     os.getenv("ENABLE_TELEGRAM_COMMAND_POLLING", "true").strip().lower()
     in {"1", "true", "yes", "on"}
@@ -854,6 +854,12 @@ async def main():
     async with aiohttp.ClientSession(
         timeout=timeout,
     ) as session:
+        try:
+            await tg(session, "🟢 FOMO 10X Scanner is online.\\n\\nSolana market scanning is active. Qualified alerts are sent automatically after the configured market, momentum and security checks. Narrative and attention are not alert gates.")
+            logging.info("Telegram startup status message delivered successfully")
+        except Exception:
+            logging.exception("Telegram startup status message failed; scanner will continue")
+
         command_listener_task = None
         if ENABLE_TELEGRAM_COMMAND_POLLING:
             command_listener_task = asyncio.create_task(
@@ -892,15 +898,16 @@ async def run():
     runner = await start_health_server()
     command_listener_task = None
     try:
+        # Apply the explicitly requested one-time Test 5 reset before old
+        # milestone notifications or queued tracker work are resumed.
+        resume_pending_tracking()
+
         # Retry durable milestone notifications left pending by a previous
         # shutdown or Telegram outage. Delivery failure must not stop scanning.
         try:
             await deliver_pending_notifications()
         except Exception:
             logging.exception("Could not drain pending tracker notifications at startup")
-
-        # Resume any scanner alerts durably queued before the previous process stopped.
-        resume_pending_tracking()
 
         try:
             tracker_interval = int(os.getenv("TRACKER_MC_POLL_SECONDS", "300"))
