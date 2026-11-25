@@ -484,6 +484,11 @@ class RecurringCohortAndJournalTests(unittest.TestCase):
                     "2026-11-24T10:00:00Z",
                 ), "added")
 
+            # Simulate the legacy database: the previous tracker did not
+            # have a completion-export queue row to trigger the normal rollover.
+            with db._connect() as connection:
+                connection.execute("DELETE FROM completion_export_queue WHERE id=1")
+
             reopened = TrackerDatabase(path)
             self.assertEqual(reopened.current_test_number(), 5)
             self.assertEqual(reopened.count(), 0)
