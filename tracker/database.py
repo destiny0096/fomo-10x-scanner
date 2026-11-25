@@ -245,8 +245,12 @@ class TrackerDatabase:
         address = str(token.get("address") or "").strip()
         if not address:
             return "invalid"
-        payload = {"address": address, "name": str(token.get("name") or ""),
-                   "symbol": str(token.get("symbol") or ""), "market_cap": token.get("market_cap")}
+        payload = {
+            "address": address, "name": str(token.get("name") or ""),
+            "symbol": str(token.get("symbol") or ""), "market_cap": token.get("market_cap"),
+            "narrative_evidence": token.get("narrative_evidence") or [],
+            "attention_evidence": token.get("attention_evidence") or [],
+        }
         serialized = json.dumps(payload, sort_keys=True, allow_nan=False)
         now = datetime.now(timezone.utc).isoformat()
         with self._connect() as db:
