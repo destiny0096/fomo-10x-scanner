@@ -469,6 +469,33 @@ class RecurringCohortAndJournalTests(unittest.TestCase):
             self.assertEqual(reopened.count(), 1)
             self.assertEqual(reopened.list_tokens()[0]["test_number"], 5)
 
+    def test_startup_recovers_already_full_cohort_and_preserves_all_100(self):
+        import json
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "tracker.db"
+            db = TrackerDatabase(path)
+            for index in range(100):
+                self.assertEqual(db.add_qualified(
+                    {"address": f"AlreadyDoneMint{index}", "market_cap": 100 + index},
+                    "2026-11-24T10:00:00Z",
+                ), "added")
+
+            reopened = TrackerDatabase(path)
+            self.assertEqual(reopened.current_test_number(), 5)
+            self.assertEqual(reopened.count(), 0)
+            history = reopened.list_completed_cohorts()
+            self.assertEqual(len(history), 1)
+            self.assertEqual(history[0]["test_number"], 4)
+            self.assertEqual(len(json.loads(history[0]["tokens_json"])), 100)
+
+            self.assertEqual(reopened.add_qualified(
+                {"address": "FreshTest5Mint", "market_cap": 250},
+                "2026-11-25T12:00:00Z",
+            ), "added")
+            self.assertEqual(reopened.count(), 1)
+            self.assertEqual(reopened.list_tokens()[-1]["test_number"], 5)
+
     def test_sent_alert_journal_survives_reopen(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "journal.db"
