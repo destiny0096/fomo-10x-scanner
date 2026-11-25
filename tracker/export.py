@@ -11,7 +11,7 @@ from .performance import current_multiple, peak_multiple
 
 
 CSV_FIELDS = [
-    "rank", "symbol", "name", "address", "qualified_at",
+    "test_number", "rank", "symbol", "name", "address", "qualified_at",
     "starting_market_cap", "current_market_cap", "peak_market_cap",
     "current_multiple", "peak_multiple",
     "narrative_evidence", "attention_evidence",
@@ -59,6 +59,7 @@ def export_results(tokens: list[dict[str, Any]], destination: str | Path) -> Pat
             for rank, token in enumerate(ranked, start=1):
                 narrative, attention = _evidence_columns(token)
                 writer.writerow({
+                    "test_number": token.get("test_number", 4),
                     "rank": rank,
                     "symbol": _spreadsheet_safe(token.get("symbol", "")),
                     "name": _spreadsheet_safe(token.get("name", "")),
