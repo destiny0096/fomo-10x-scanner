@@ -660,12 +660,13 @@ async def evaluate_pair(session, pair):
     )
 
     # Narrative and attention are mandatory gates BEFORE Telegram distribution.
-    # Use reported marketCap only; never relabel FDV as market cap for the tracker.
+    # Keep the scanner's existing FDV fallback for alert eligibility. The tracker
+    # receives reported marketCap only below and rejects missing MC rather than FDV.
     evidence_result = await evaluate_candidate({
         "address": address,
         "name": token.get("name", ""),
         "symbol": token.get("symbol", ""),
-        "market_cap": pair.get("marketCap"),
+        "market_cap": mc,
     })
     if evidence_result.get("status") != "qualified":
         logging.info(
@@ -753,7 +754,8 @@ async def evaluate_pair(session, pair):
     # The scanner may use FDV as a fallback for its existing alert filter.
     # The tracker must receive reported marketCap only, never FDV mislabeled as MC.
     try:
-        schedule_tracking(qualified_token)
+        tracker_token = {**qualified_token, "market_cap": pair.get("marketCap")}
+        schedule_tracking(tracker_token)
     except Exception:
         logging.exception(
             "Tracker scheduling failed for %s; scanner alert remains recorded",
