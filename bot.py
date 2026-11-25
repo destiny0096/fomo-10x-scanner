@@ -43,6 +43,13 @@ POLL_SECONDS = max(
     int(os.getenv("POLL_SECONDS", "120"))
 )
 
+# getUpdates permits only one active long-polling consumer per bot token.
+# Keep command polling opt-in so the scanner can run safely alongside deployments.
+ENABLE_TELEGRAM_COMMAND_POLLING = (
+    os.getenv("ENABLE_TELEGRAM_COMMAND_POLLING", "false").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
+
 BASE = "https://api.dexscreener.com"
 HEAD = {}
 
@@ -847,10 +854,20 @@ async def main():
     async with aiohttp.ClientSession(
         timeout=timeout,
     ) as session:
-        command_listener_task = asyncio.create_task(
-            telegram_command_listener(session),
-            name="fomo-telegram-command-listener",
-        )
+        command_listener_task = None
+        if ENABLE_TELEGRAM_COMMAND_POLLING:
+            command_listener_task = asyncio.create_task(
+                telegram_command_listener(session),
+                name="fomo-telegram-command-listener",
+            )
+            logging.warning(
+                "Telegram /start and /help polling is enabled; "
+                "ensure no other process uses getUpdates for this bot token"
+            )
+        else:
+            logging.info(
+                "Telegram command polling disabled; outbound scanner alerts remain enabled"
+            )
 
         try:
             while True:
@@ -863,11 +880,12 @@ async def main():
 
                 await asyncio.sleep(POLL_SECONDS)
         finally:
-            command_listener_task.cancel()
-            try:
-                await command_listener_task
-            except asyncio.CancelledError:
-                pass
+            if command_listener_task is not None:
+                command_listener_task.cancel()
+                try:
+                    await command_listener_task
+                except asyncio.CancelledError:
+                    pass
 
 
 async def run():
