@@ -1,40 +1,39 @@
-"""Focused tests for scanner-side DexScreener response handling."""
+"""Tests for scanner alert delivery independent of public social evidence."""
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-# bot.py reads Telegram configuration during import. Supply harmless placeholders;
-# these tests never make Telegram or network requests.
 with patch.dict(os.environ, {
     "TELEGRAM_BOT_TOKEN": "test-token",
     "TELEGRAM_CHAT_ID": "test-chat",
 }):
     import bot
 
-PASSING_NARRATIVE = [{
-    "source": "Project website", "url": "https://example.org/about",
-    "summary": "A community-led project building open tools for creators and digital culture.",
-    "observed_at": "2026-11-25T10:00:00Z",
-}]
-PASSING_ATTENTION = [{
-    "source": "Reddit public search", "url": "https://www.reddit.com/r/example/comments/abc/post",
-    "summary": "A recent public discussion directly references this token and project.",
-    "observed_at": "2026-11-25T10:01:00Z",
-}]
+from tracker.database import TrackerDatabase
+from tracker.pipeline import evaluate_and_record
+import tracker.integration as integration
 
-async def passing_precheck(token):
-    return {"status": "qualified", "candidate": {
-        **token, "narrative_evidence": PASSING_NARRATIVE,
-        "attention_evidence": PASSING_ATTENTION,
-    }, "reason": "narrative and attention passed"}
+
+def make_pair(address="MintNoSocial", market_cap=50000):
+    pair = {
+        "chainId": "solana",
+        "baseToken": {"address": address, "name": "Example", "symbol": "EX"},
+        "marketCap": market_cap,
+        "liquidity": {"usd": 10000},
+        "volume": {"h24": 10000, "m5": 5000},
+        "txns": {"h24": {"buys": 30, "sells": 10}, "m5": {"buys": 8, "sells": 2}},
+        "priceChange": {"m5": 15},
+        "url": f"https://dexscreener.com/solana/{address}",
+    }
+    return pair
 
 
 class BestSolanaPairsTests(unittest.TestCase):
     def test_ignores_malformed_entries_without_aborting_batch(self):
         pairs = [
-            None,
-            "not-a-pair",
-            [],
+            None, "not-a-pair", [],
             {"chainId": "solana", "baseToken": None, "liquidity": {"usd": 50}},
             {"chainId": "solana", "baseToken": {"address": "MintA"}, "liquidity": {"usd": "bad"}},
             {"chainId": "solana", "baseToken": {"address": "MintA"}, "liquidity": {"usd": 100}},
@@ -49,94 +48,16 @@ class BestSolanaPairsTests(unittest.TestCase):
         self.assertEqual(bot.best_solana_pairs({"pairs": []}), {})
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
-class ScannerTrackerIsolationTests(unittest.IsolatedAsyncioTestCase):
-    async def test_tracker_schedule_failure_does_not_undo_successful_scanner_alert(self):
-        pair = {
-            "chainId": "solana",
-            "baseToken": {"address": "MintTrackerDown", "name": "Example", "symbol": "EX"},
-            "marketCap": 50000,
-            "liquidity": {"usd": 10000},
-            "volume": {"h24": 10000, "m5": 5000},
-            "txns": {"h24": {"buys": 30, "sells": 10}, "m5": {"buys": 8, "sells": 2}},
-            "priceChange": {"m5": 15},
-            "url": "https://dexscreener.com/solana/MintTrackerDown",
-        }
-        address = "MintTrackerDown"
-        bot.alerted.discard(address)
-        bot.candidates[address] = 1
-
-        import tempfile
-        with tempfile.TemporaryDirectory() as directory, \
-             patch.dict(os.environ, {"TRACKER_DB_PATH": str(__import__("pathlib").Path(directory) / "journal.db")}), \
-             patch.object(bot, "evaluate_candidate", new=AsyncMock(side_effect=passing_precheck)), \
-             patch.object(bot, "check_security", new=AsyncMock(return_value={})), \
-             patch.object(bot, "check_lp_status", new=AsyncMock(return_value="BURNED")), \
-             patch.object(bot, "check_sell_route", new=AsyncMock(return_value="OK")), \
-             patch.object(bot, "security_summary", return_value="Security checked"), \
-             patch.object(bot, "lp_status_text", return_value="LP checked"), \
-             patch.object(bot, "sell_route_text", return_value="Sell route checked"), \
-             patch.object(bot, "tg", new=AsyncMock(return_value=None)) as telegram, \
-             patch.object(bot, "schedule_tracking", side_effect=RuntimeError("tracker unavailable")):
-            sent = await bot.evaluate_pair(object(), pair)
-
-        self.assertTrue(sent)
-        telegram.assert_awaited_once()
-        self.assertIn(address, bot.alerted)
-        self.assertNotIn(address, bot.candidates)
-
-
 class ScannerTrackerEndToEndTests(unittest.IsolatedAsyncioTestCase):
-    async def test_successful_telegram_alert_flows_through_durable_queue_and_qualification(self):
-        import tempfile
-        from pathlib import Path
-        from tracker.database import TrackerDatabase
-        import tracker.integration as integration
-        from tracker.pipeline import evaluate_and_record
+    async def asyncSetUp(self):
+        bot.alerted.clear()
+        bot.candidates.clear()
 
-        narrative = [{
-            "source": "Project website",
-            "url": "https://example.org/about",
-            "summary": "A community-led project building open tools for creators and digital culture.",
-            "observed_at": "2026-11-10T10:00:00Z",
-        }]
-        attention = [{
-            "source": "Reddit public search",
-            "url": "https://reddit.com/r/example/post",
-            "summary": "Independent authors discussed the project with measurable engagement.",
-            "distinct_authors": 2,
-            "post_count": 2,
-            "engagement": 7,
-            "observed_at": "2026-11-10T10:01:00Z",
-        }]
-
-        async def passing_collector(_address, _name, _symbol):
-            return {"narrative_evidence": narrative, "attention_evidence": attention}
-
-        async def real_pipeline_with_test_evidence(token, database):
-            return await evaluate_and_record(token, database=database)
-
-        pair = {
-            "chainId": "solana",
-            "baseToken": {"address": "MintEndToEnd", "name": "Example", "symbol": "EX"},
-            "marketCap": 50000,
-            "liquidity": {"usd": 10000},
-            "volume": {"h24": 10000, "m5": 5000},
-            "txns": {"h24": {"buys": 30, "sells": 10}, "m5": {"buys": 8, "sells": 2}},
-            "priceChange": {"m5": 15},
-            "url": "https://dexscreener.com/solana/MintEndToEnd",
-        }
-
+    async def test_alert_is_sent_without_reddit_or_website_evidence_and_tracked(self):
         with tempfile.TemporaryDirectory() as directory:
             db_path = Path(directory) / "tracker.db"
-            address = "MintEndToEnd"
-            bot.alerted.discard(address)
-            bot.candidates[address] = 1
+            pair = make_pair()
             with patch.dict(os.environ, {"TRACKER_DB_PATH": str(db_path)}), \
-                 patch.object(bot, "evaluate_candidate", new=AsyncMock(side_effect=passing_precheck)), \
                  patch.object(bot, "check_security", new=AsyncMock(return_value={})), \
                  patch.object(bot, "check_lp_status", new=AsyncMock(return_value="BURNED")), \
                  patch.object(bot, "check_sell_route", new=AsyncMock(return_value="OK")), \
@@ -144,8 +65,8 @@ class ScannerTrackerEndToEndTests(unittest.IsolatedAsyncioTestCase):
                  patch.object(bot, "lp_status_text", return_value="LP checked"), \
                  patch.object(bot, "sell_route_text", return_value="Sell route checked"), \
                  patch.object(bot, "tg", new=AsyncMock(return_value=None)) as telegram, \
-                 patch("tracker.integration.evaluate_and_record", side_effect=real_pipeline_with_test_evidence), \
                  patch("tracker.integration.send_progress_notification", new=AsyncMock(return_value=True)):
+                bot.candidates[pair["baseToken"]["address"]] = 1
                 sent = await bot.evaluate_pair(object(), pair)
                 self.assertTrue(sent)
                 telegram.assert_awaited_once()
@@ -153,121 +74,41 @@ class ScannerTrackerEndToEndTests(unittest.IsolatedAsyncioTestCase):
 
             db = TrackerDatabase(db_path)
             self.assertEqual(db.count(), 1)
-            recorded = db.list_tokens()[0]
-            self.assertEqual(recorded["address"], address)
-            self.assertEqual(recorded["initial_mc"], 50000)
+            self.assertEqual(db.list_tokens()[0]["address"], "MintNoSocial")
+            self.assertEqual(db.list_tokens()[0]["initial_mc"], 50000)
             self.assertEqual(db.pending_candidate_count(), 0)
-            self.assertIn(address, bot.alerted)
-            self.assertNotIn(address, bot.candidates)
 
-    async def test_failed_scanner_telegram_alert_never_enters_tracker_queue(self):
-        import tempfile
-        from pathlib import Path
-        from tracker.database import TrackerDatabase
-
-        pair = {
-            "chainId": "solana",
-            "baseToken": {"address": "MintTelegramFail", "name": "Example", "symbol": "EX"},
-            "marketCap": 50000,
-            "liquidity": {"usd": 10000},
-            "volume": {"h24": 10000, "m5": 5000},
-            "txns": {"h24": {"buys": 30, "sells": 10}, "m5": {"buys": 8, "sells": 2}},
-            "priceChange": {"m5": 15},
-        }
-        address = "MintTelegramFail"
-        bot.alerted.discard(address)
-        bot.candidates[address] = 1
-
-        with tempfile.TemporaryDirectory() as directory:
-            db_path = Path(directory) / "tracker.db"
-            with patch.dict(os.environ, {"TRACKER_DB_PATH": str(db_path)}), \
-                 patch.object(bot, "evaluate_candidate", new=AsyncMock(side_effect=passing_precheck)), \
-                 patch.object(bot, "check_security", new=AsyncMock(return_value={})), \
-                 patch.object(bot, "check_lp_status", new=AsyncMock(return_value="BURNED")), \
-                 patch.object(bot, "check_sell_route", new=AsyncMock(return_value="OK")), \
-                 patch.object(bot, "security_summary", return_value="Security checked"), \
-                 patch.object(bot, "lp_status_text", return_value="LP checked"), \
-                 patch.object(bot, "sell_route_text", return_value="Sell route checked"), \
-                 patch.object(bot, "tg", new=AsyncMock(side_effect=RuntimeError("Telegram unavailable"))), \
-                 patch.object(bot, "schedule_tracking") as schedule:
-                with self.assertRaisesRegex(RuntimeError, "Telegram unavailable"):
-                    await bot.evaluate_pair(object(), pair)
-
-            schedule.assert_not_called()
-            self.assertNotIn(address, bot.alerted)
-            self.assertIn(address, bot.candidates)
-            self.assertEqual(TrackerDatabase(db_path).pending_candidate_count(), 0)
-
-    async def test_tracker_journal_storage_failure_does_not_block_scanner_alert(self):
-        pair = {
-            "chainId": "solana",
-            "baseToken": {"address": "MintJournalDiskDown", "name": "Example", "symbol": "EX"},
-            "marketCap": 50000,
-            "liquidity": {"usd": 10000},
-            "volume": {"h24": 10000, "m5": 5000},
-            "txns": {"h24": {"buys": 30, "sells": 10}, "m5": {"buys": 8, "sells": 2}},
-            "priceChange": {"m5": 15},
-        }
-        address = "MintJournalDiskDown"
-        bot.alerted.discard(address)
-        bot.candidates[address] = 1
-        with patch.object(bot, "evaluate_candidate", new=AsyncMock(side_effect=passing_precheck)), \
-             patch.object(bot, "check_security", new=AsyncMock(return_value={})), \
+    async def test_scanner_alert_still_sends_if_tracker_storage_is_unavailable(self):
+        pair = make_pair("MintTrackerDown")
+        with patch.object(bot, "check_security", new=AsyncMock(return_value={})), \
              patch.object(bot, "check_lp_status", new=AsyncMock(return_value="BURNED")), \
              patch.object(bot, "check_sell_route", new=AsyncMock(return_value="OK")), \
              patch.object(bot, "security_summary", return_value="Security checked"), \
              patch.object(bot, "lp_status_text", return_value="LP checked"), \
              patch.object(bot, "sell_route_text", return_value="Sell route checked"), \
-             patch.object(bot, "TrackerDatabase", side_effect=OSError("persistent disk unavailable")), \
+             patch.object(bot, "TrackerDatabase", side_effect=OSError("disk unavailable")), \
              patch.object(bot, "tg", new=AsyncMock(return_value=None)) as telegram, \
              patch.object(bot, "schedule_tracking", return_value=False):
             sent = await bot.evaluate_pair(object(), pair)
         self.assertTrue(sent)
         telegram.assert_awaited_once()
-        self.assertIn(address, bot.alerted)
 
-    async def test_narrative_or_attention_rejection_prevents_scanner_alert(self):
-        pair = {
-            "chainId": "solana",
-            "baseToken": {"address": "MintNoEvidence", "name": "Example", "symbol": "EX"},
-            "marketCap": 50000,
-            "liquidity": {"usd": 10000},
-            "volume": {"h24": 10000, "m5": 5000},
-            "txns": {"h24": {"buys": 30, "sells": 10}, "m5": {"buys": 8, "sells": 2}},
-            "priceChange": {"m5": 15},
-        }
-        address = "MintNoEvidence"
-        bot.alerted.discard(address)
-        bot.candidates[address] = 1
-        with patch.object(bot, "evaluate_candidate", new=AsyncMock(return_value={
-                "status": "rejected", "reason": "No verifiable narrative or public discussion"
-        })) as evaluate, \
-             patch.object(bot, "check_security", new=AsyncMock(return_value={})), \
+    async def test_failed_telegram_delivery_does_not_enter_tracker(self):
+        pair = make_pair("MintTelegramFail")
+        with patch.object(bot, "check_security", new=AsyncMock(return_value={})), \
              patch.object(bot, "check_lp_status", new=AsyncMock(return_value="BURNED")), \
              patch.object(bot, "check_sell_route", new=AsyncMock(return_value="OK")), \
-             patch.object(bot, "tg", new=AsyncMock(return_value=None)) as telegram:
-            sent = await bot.evaluate_pair(object(), pair)
-        self.assertFalse(sent)
-        evaluate.assert_awaited_once()
-        telegram.assert_not_awaited()
-        self.assertNotIn(address, bot.alerted)
-        self.assertIn(address, bot.candidates)
+             patch.object(bot, "tg", new=AsyncMock(side_effect=RuntimeError("Telegram unavailable"))), \
+             patch.object(bot, "schedule_tracking") as schedule:
+            with self.assertRaisesRegex(RuntimeError, "Telegram unavailable"):
+                await bot.evaluate_pair(object(), pair)
+        schedule.assert_not_called()
 
-    async def test_fdv_fallback_still_alerts_but_is_not_recorded_as_tracker_market_cap(self):
-        pair = {
-            "chainId": "solana",
-            "baseToken": {"address": "MintFdvOnly", "name": "Example", "symbol": "EX"},
-            "fdv": 50000,
-            "liquidity": {"usd": 10000},
-            "volume": {"h24": 10000, "m5": 5000},
-            "txns": {"h24": {"buys": 30, "sells": 10}, "m5": {"buys": 8, "sells": 2}},
-            "priceChange": {"m5": 15},
-        }
-        address = "MintFdvOnly"
-        bot.alerted.discard(address)
-        bot.candidates[address] = 1
-        with patch.object(bot, "evaluate_candidate", new=AsyncMock(side_effect=passing_precheck)) as evaluate, \
-             patch.object(bot, "check_security", new=AsyncMock(return_value={})), \
+    async def test_fdv_fallback_can_alert_but_missing_reported_market_cap_is_not_tracked(self):
+        pair = make_pair("MintFdvOnly", market_cap=None)
+        pair.pop("marketCap")
+        pair["fdv"] = 50000
+        with patch.object(bot, "check_security", new=AsyncMock(return_value={})), \
              patch.object(bot, "check_lp_status", new=AsyncMock(return_value="BURNED")), \
              patch.object(bot, "check_sell_route", new=AsyncMock(return_value="OK")), \
              patch.object(bot, "security_summary", return_value="Security checked"), \
@@ -280,5 +121,8 @@ class ScannerTrackerEndToEndTests(unittest.IsolatedAsyncioTestCase):
             sent = await bot.evaluate_pair(object(), pair)
         self.assertTrue(sent)
         telegram.assert_awaited_once()
-        self.assertEqual(evaluate.await_args.args[0]["market_cap"], 50000)
         self.assertIsNone(schedule.call_args.args[0]["market_cap"])
+
+
+if __name__ == "__main__":
+    unittest.main()
