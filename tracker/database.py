@@ -67,6 +67,11 @@ class TrackerDatabase:
                 status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
                 claimed_at TEXT, sent_at TEXT)
             """)
+            db.execute("""CREATE TABLE IF NOT EXISTS alert_journal (
+                address TEXT PRIMARY KEY, token_json TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL,
+                sent_at TEXT, last_error TEXT)
+            """)
             db.execute("""CREATE TABLE IF NOT EXISTS candidate_queue (
                 address TEXT PRIMARY KEY, token_json TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
@@ -239,6 +244,40 @@ class TrackerDatabase:
             return int(db.execute(
                 "SELECT COUNT(*) FROM completion_export_queue WHERE status!='sent'"
             ).fetchone()[0])
+
+    def prepare_alert(self, token: dict[str, Any]) -> str:
+        """Durably journal an alert before Telegram delivery; return its prior state."""
+        address = str(token.get("address") or "").strip()
+        if not address:
+            return "invalid"
+        payload = json.dumps(token, sort_keys=True, allow_nan=False)
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT status FROM alert_journal WHERE address=?", (address,)).fetchone()
+            if row and row["status"] == "sent":
+                return "sent"
+            db.execute("""INSERT INTO alert_journal(address,token_json,status,created_at)
+                VALUES(?,?,'pending',?) ON CONFLICT(address) DO UPDATE SET
+                token_json=excluded.token_json,status='pending',last_error=NULL""",
+                (address, payload, now))
+            return "pending"
+
+    def finish_alert(self, address: str, *, sent: bool, error: str = "") -> None:
+        """Finalize the durable send journal after Telegram responds."""
+        with self._connect() as db:
+            if sent:
+                db.execute("""UPDATE alert_journal SET status='sent',sent_at=?,last_error=NULL
+                    WHERE address=?""", (datetime.now(timezone.utc).isoformat(), address))
+            else:
+                db.execute("UPDATE alert_journal SET status='failed',last_error=? WHERE address=?",
+                           (str(error)[:300], address))
+
+    def list_sent_alerts(self) -> list[dict[str, Any]]:
+        """Return the permanent journal of successfully delivered token alerts."""
+        with self._connect() as db:
+            rows = db.execute("SELECT * FROM alert_journal WHERE status='sent' ORDER BY sent_at").fetchall()
+        return [dict(row) for row in rows]
 
     def enqueue_candidate(self, token: dict[str, Any]) -> str:
         """Durably queue a scanner alert for evidence evaluation."""
