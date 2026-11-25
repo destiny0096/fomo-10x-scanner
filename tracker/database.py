@@ -101,7 +101,9 @@ class TrackerDatabase:
             state = db.execute("SELECT test_number FROM tracker_state WHERE id=1").fetchone()
             cycle = int(state[0]) if state else 4
             rows = db.execute("SELECT * FROM tracked_tokens WHERE test_number=? ORDER BY id", (cycle,)).fetchall()
-            if len(rows) == MAX_TRADES:
+            export_state = db.execute("SELECT status FROM completion_export_queue WHERE id=1").fetchone()
+            # Preserve pending exports; recover legacy full cohorts with no queue row.
+            if len(rows) == MAX_TRADES and (export_state is None or export_state["status"] == "sent"):
                 now = datetime.now(timezone.utc).isoformat()
                 payload = json.dumps([dict(row) for row in rows], sort_keys=True)
                 db.execute("INSERT OR IGNORE INTO completed_cohorts (test_number,completed_at,tokens_json) VALUES (?,?,?)", (cycle, now, payload))
