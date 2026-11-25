@@ -46,7 +46,7 @@ POLL_SECONDS = max(
 # getUpdates permits only one active long-polling consumer per bot token.
 # Keep command polling opt-in so the scanner can run safely alongside deployments.
 ENABLE_TELEGRAM_COMMAND_POLLING = (
-    os.getenv("ENABLE_TELEGRAM_COMMAND_POLLING", "false").strip().lower()
+    os.getenv("ENABLE_TELEGRAM_COMMAND_POLLING", "true").strip().lower()
     in {"1", "true", "yes", "on"}
 )
 
