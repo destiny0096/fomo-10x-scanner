@@ -709,11 +709,11 @@ async def evaluate_pair(session, pair):
             momentum,
             buy_pressure,
         )
-        + "\\n\\n🛡️ SECURITY\\n"
+        + "\n\n🛡️ SECURITY\n"
         + security_summary(security)
-        + "\\n\\n"
+        + "\n\n"
         + lp_status_text(lp_status)
-        + "\\n\\n"
+        + "\n\n"
         + sell_route_text(sell_status)
     )
 
@@ -855,7 +855,7 @@ async def main():
         timeout=timeout,
     ) as session:
         try:
-            await tg(session, "🟢 FOMO 10X Scanner is online.\\n\\nSolana market scanning is active. Qualified alerts are sent automatically after the configured market, momentum and security checks. Narrative and attention are not alert gates.")
+            await tg(session, "🟢 FOMO 10X Scanner is online.\n\nSolana market scanning is active. Qualified alerts are sent automatically after the configured market, momentum and security checks. Narrative and attention are not alert gates.")
             logging.info("Telegram startup status message delivered successfully")
         except Exception:
             logging.exception("Telegram startup status message failed; scanner will continue")
