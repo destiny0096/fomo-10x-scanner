@@ -12,6 +12,8 @@ from security_test import check_security, security_summary
 from lp_test import check_lp_status, lp_status_text
 from sell_route_test import check_sell_route, sell_route_text
 from tracker.integration import deliver_pending_notifications, drain_tracking_tasks, resume_pending_tracking, schedule_tracking
+from tracker.pipeline import evaluate_candidate
+from tracker.database import TrackerDatabase
 from tracker.market_monitor import market_cap_monitor
 
 
@@ -171,12 +173,12 @@ def telegram_command_response(text):
 
     if command == "/start":
         return (
-            "Welcome to FOMO 10X Scanner! 🚀\\n\\n"
+            "Welcome to FOMO 10X Scanner! 🚀\n\n"
             "This bot delivers automated Solana memecoin watch alerts. "
             "It monitors market cap, liquidity, trading volume, buying "
-            "pressure, momentum and token security.\\n\\n"
+            "pressure, momentum and token security.\n\n"
             "When a token meets the scanner's filters, an alert is sent "
-            "with its market data and security checks.\\n\\n"
+            "with its market data and security checks.\n\n"
             "Use /help to see what this bot does. "
             "This is an alert and research tool, not an exchange or "
             "guarantee of trading results."
@@ -184,11 +186,11 @@ def telegram_command_response(text):
 
     if command == "/help":
         return (
-            "FOMO 10X Scanner — Help\\n\\n"
+            "FOMO 10X Scanner — Help\n\n"
             "The bot automatically sends filtered Solana token alerts. "
             "Alerts include market cap, liquidity, 24-hour volume, "
             "buying pressure, 5-minute momentum, scanner score, "
-            "token security, liquidity-pool status and sell-route checks.\\n\\n"
+            "token security, liquidity-pool status and sell-route checks.\n\n"
             "There are no manual trading or buy/sell commands."
         )
 
@@ -657,6 +659,35 @@ async def evaluate_pair(session, pair):
         address,
     )
 
+    # Narrative and attention are mandatory gates BEFORE Telegram distribution.
+    # Keep the scanner's existing FDV fallback for alert eligibility. The tracker
+    # receives reported marketCap only below and rejects missing MC rather than FDV.
+    evidence_result = await evaluate_candidate({
+        "address": address,
+        "name": token.get("name", ""),
+        "symbol": token.get("symbol", ""),
+        "market_cap": mc,
+    })
+    if evidence_result.get("status") != "qualified":
+        logging.info(
+            "REJECT %s: narrative/attention gate status=%s reason=%s",
+            token.get("symbol"), evidence_result.get("status"),
+            evidence_result.get("reason", ""),
+        )
+        return False
+
+    qualified_token = evidence_result["candidate"]
+    narrative_lines = qualified_token.get("narrative_evidence") or []
+    attention_lines = qualified_token.get("attention_evidence") or []
+    narrative_text = "\n".join(
+        f"• {item.get('source', 'Source')}: {item.get('summary', '')}"
+        for item in narrative_lines if isinstance(item, dict)
+    )
+    attention_text = "\n".join(
+        f"• {item.get('source', 'Source')}: {item.get('summary', '')}"
+        for item in attention_lines if isinstance(item, dict)
+    )
+
     message = (
         alert(
             pair,
@@ -668,6 +699,10 @@ async def evaluate_pair(session, pair):
             momentum,
             buy_pressure,
         )
+        + "\n\n🧠 NARRATIVE CHECK — PASS\n"
+        + narrative_text
+        + "\n\n👀 ATTENTION CHECK — PASS\n"
+        + attention_text
         + "\n\n🛡️ SECURITY\n"
         + security_summary(security)
         + "\n\n"
@@ -676,8 +711,40 @@ async def evaluate_pair(session, pair):
         + sell_route_text(sell_status)
     )
 
-    # Only mark the token alerted after Telegram confirms success.
-    await tg(session, message)
+    # The durable journal prevents duplicate alerts, but it is optional to
+    # scanner delivery: a tracker-disk failure must never stop a valid alert.
+    journal_db = None
+    try:
+        journal_db = TrackerDatabase(timeout_seconds=0.5)
+        journal_status = journal_db.prepare_alert(qualified_token)
+        if journal_status == "sent":
+            logging.info("SKIP %s: already present in sent-alert journal", address)
+            alerted.add(address)
+            candidates.pop(address, None)
+            return False
+    except Exception:
+        journal_db = None
+        logging.exception(
+            "Alert journal unavailable for %s; continuing with scanner Telegram delivery",
+            address,
+        )
+
+    try:
+        await tg(session, message)
+    except Exception as exc:
+        if journal_db is not None:
+            try:
+                journal_db.finish_alert(address, sent=False, error=str(exc))
+            except Exception:
+                logging.exception("Could not mark failed alert journal entry for %s", address)
+        raise
+    if journal_db is not None:
+        try:
+            journal_db.finish_alert(address, sent=True)
+        except Exception:
+            # Telegram has already confirmed delivery. Keep the scanner's in-memory
+            # dedupe state and report the journal write failure for operator review.
+            logging.exception("Telegram sent but alert journal finalization failed for %s", address)
 
     # Telegram has succeeded: commit scanner-side alert bookkeeping first.
     # Tracker scheduling is optional and must never cause a duplicate scanner alert.
@@ -687,12 +754,8 @@ async def evaluate_pair(session, pair):
     # The scanner may use FDV as a fallback for its existing alert filter.
     # The tracker must receive reported marketCap only, never FDV mislabeled as MC.
     try:
-        schedule_tracking({
-            "address": address,
-            "name": token.get("name", ""),
-            "symbol": token.get("symbol", ""),
-            "market_cap": pair.get("marketCap"),
-        })
+        tracker_token = {**qualified_token, "market_cap": pair.get("marketCap")}
+        schedule_tracking(tracker_token)
     except Exception:
         logging.exception(
             "Tracker scheduling failed for %s; scanner alert remains recorded",

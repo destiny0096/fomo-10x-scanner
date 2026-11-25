@@ -17,12 +17,11 @@ ATTENTION = [{"source":"Reddit public search","url":"https://www.reddit.com/r/ex
 
 
 class QualificationTests(unittest.TestCase):
-    def test_narrative_and_attention_are_not_required(self):
+    def test_narrative_and_attention_are_required(self):
         result = qualify_token({"address": "Mint111"})
-        self.assertTrue(result.qualified)
-        self.assertTrue(result.narrative_pass)
-        self.assertTrue(result.attention_pass)
-        self.assertIn("checks disabled", " ".join(result.reasons).lower())
+        self.assertFalse(result.qualified)
+        self.assertFalse(result.narrative_pass)
+        self.assertFalse(result.attention_pass)
 
     def test_missing_address_is_rejected(self):
         self.assertFalse(qualify_token({"market_cap": 10000}).qualified)
@@ -304,7 +303,9 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(db.enqueue_candidate(token), "queued")
             reopened = TrackerDatabase(path)
             self.assertEqual(reopened.pending_candidate_count(), 1)
-            self.assertEqual(reopened.claim_next_candidate(), token)
+            self.assertEqual(reopened.claim_next_candidate(), {
+                **token, "narrative_evidence": [], "attention_evidence": []
+            })
             reopened.retry_candidate("QueuedMint", "simulated interruption")
             self.assertEqual(TrackerDatabase(path).pending_candidate_count(), 1)
 
@@ -432,3 +433,89 @@ class ReportTests(unittest.TestCase):
             self.assertEqual(exported[0]["peak_multiple"], "12.0")
             self.assertIn("Project website", exported[0]["narrative_evidence"])
             self.assertEqual(exported[1]["symbol"], "'=2+2")
+
+class RecurringCohortAndJournalTests(unittest.TestCase):
+    def test_next_cohort_starts_only_after_export_is_confirmed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "tracker.db"
+            db = TrackerDatabase(path)
+            for index in range(100):
+                self.assertEqual(db.add_qualified(
+                    {"address": f"Cycle4Mint{index}", "market_cap": 100},
+                    "2026-11-25T10:00:00Z",
+                ), "added")
+            self.assertEqual(db.current_test_number(), 4)
+            self.assertEqual(db.count(), 100)
+            self.assertEqual(db.pending_completion_export_count(), 1)
+
+            db.finish_completion_export(sent=False)
+            self.assertEqual(db.current_test_number(), 4)
+            self.assertEqual(db.count(), 100)
+
+            db.finish_completion_export(sent=True)
+            self.assertEqual(db.current_test_number(), 5)
+            self.assertEqual(db.count(), 0)
+            history = db.list_completed_cohorts()
+            self.assertEqual(len(history), 1)
+            self.assertEqual(history[0]["test_number"], 4)
+            self.assertEqual(len(__import__("json").loads(history[0]["tokens_json"])), 100)
+
+            with db._connect() as connection:
+                connection.execute("DELETE FROM completion_export_queue WHERE id=1")
+
+            reopened = TrackerDatabase(path)
+            self.assertEqual(reopened.current_test_number(), 5)
+            self.assertEqual(reopened.add_qualified(
+                {"address": "Cycle5Mint1", "market_cap": 200},
+                "2026-11-25T11:00:00Z",
+            ), "added")
+            self.assertEqual(reopened.count(), 1)
+            self.assertEqual(reopened.list_tokens()[0]["test_number"], 5)
+
+    def test_startup_recovers_already_full_cohort_and_preserves_all_100(self):
+        import json
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "tracker.db"
+            db = TrackerDatabase(path)
+            for index in range(100):
+                self.assertEqual(db.add_qualified(
+                    {"address": f"AlreadyDoneMint{index}", "market_cap": 100 + index},
+                    "2026-11-24T10:00:00Z",
+                ), "added")
+
+            # Simulate the legacy database: the previous tracker did not
+            # have a completion-export queue row to trigger the normal rollover.
+            with db._connect() as connection:
+                connection.execute("DELETE FROM completion_export_queue WHERE id=1")
+
+            reopened = TrackerDatabase(path)
+            self.assertEqual(reopened.current_test_number(), 5)
+            self.assertEqual(reopened.count(), 0)
+            history = reopened.list_completed_cohorts()
+            self.assertEqual(len(history), 1)
+            self.assertEqual(history[0]["test_number"], 4)
+            self.assertEqual(len(json.loads(history[0]["tokens_json"])), 100)
+
+            self.assertEqual(reopened.add_qualified(
+                {"address": "FreshTest5Mint", "market_cap": 250},
+                "2026-11-25T12:00:00Z",
+            ), "added")
+            self.assertEqual(reopened.count(), 1)
+            self.assertEqual(reopened.list_tokens()[-1]["test_number"], 5)
+
+    def test_sent_alert_journal_survives_reopen(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "journal.db"
+            db = TrackerDatabase(path)
+            token = {
+                "address": "JournalMint", "market_cap": 100,
+                "narrative_evidence": NARRATIVE, "attention_evidence": ATTENTION,
+            }
+            self.assertEqual(db.prepare_alert(token), "pending")
+            db.finish_alert("JournalMint", sent=True)
+            reopened = TrackerDatabase(path)
+            journal = reopened.list_sent_alerts()
+            self.assertEqual(len(journal), 1)
+            self.assertEqual(journal[0]["address"], "JournalMint")
+            self.assertEqual(reopened.prepare_alert(token), "sent")

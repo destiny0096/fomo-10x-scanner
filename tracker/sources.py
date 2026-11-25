@@ -260,7 +260,7 @@ async def collect_attention_evidence(
     min_posts: int = 1,
     min_total_engagement: int = 1,
 ) -> list[dict[str, str]]:
-    """Require at least one matching recent Reddit author/post and visible activity."""
+    """Collect relevant recent Reddit discussion without numeric engagement gates."""
     query_terms = [term for term in (symbol.strip(), name.strip()) if term]
     query_text = " OR ".join(f'"{term}"' for term in dict.fromkeys(query_terms))
     query = quote(query_text or f'"{symbol}"')
@@ -283,8 +283,6 @@ async def collect_attention_evidence(
             comments = max(0, int(post.get("num_comments") or 0))
         except (TypeError, ValueError, OverflowError):
             continue
-        if score + comments <= 0:
-            continue
         permalink = str(post.get("permalink") or "")
         if not permalink.startswith("/") or permalink.startswith("//"):
             continue
@@ -295,7 +293,7 @@ async def collect_attention_evidence(
         authors.add(author.lower())
         engagement += score + comments
         matches.append((f"https://www.reddit.com{permalink}", score, comments))
-    if len(authors) < min_posts or len(matches) < min_posts or engagement < min_total_engagement:
+    if not matches:
         return []
     sample = matches[:3]
     links = ", ".join(url for url, _, _ in sample)
@@ -306,8 +304,8 @@ async def collect_attention_evidence(
         "post_count": len(matches),
         "engagement": engagement,
         "summary": (
-            f"{len(authors)} distinct matching authors in recent public posts; "
-            f"at least {engagement} combined post score/comments observed. Sample posts: {links}"
+            f"Recent public discussion matching this token was found. "
+            f"Sample posts: {links}"
         )[:1000],
         "observed_at": utc_now(),
     }]

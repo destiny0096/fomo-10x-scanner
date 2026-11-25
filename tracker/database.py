@@ -53,7 +53,16 @@ class TrackerDatabase:
                 id INTEGER PRIMARY KEY AUTOINCREMENT, address TEXT NOT NULL UNIQUE,
                 symbol TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '',
                 initial_mc REAL NOT NULL, peak_mc REAL NOT NULL, current_mc REAL NOT NULL,
-                qualified_at TEXT NOT NULL, evidence_json TEXT NOT NULL)""")
+                qualified_at TEXT NOT NULL, evidence_json TEXT NOT NULL,
+                test_number INTEGER NOT NULL DEFAULT 4)""")
+            db.execute("""CREATE TABLE IF NOT EXISTS tracker_state (
+                id INTEGER PRIMARY KEY CHECK(id=1), test_number INTEGER NOT NULL DEFAULT 4)
+            """)
+            db.execute("INSERT OR IGNORE INTO tracker_state(id,test_number) VALUES (1,4)")
+            db.execute("""CREATE TABLE IF NOT EXISTS completed_cohorts (
+                test_number INTEGER PRIMARY KEY, completed_at TEXT NOT NULL,
+                tokens_json TEXT NOT NULL)
+            """)
             db.execute("""CREATE TABLE IF NOT EXISTS notification_outbox (
                 milestone INTEGER PRIMARY KEY, payload_json TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
@@ -67,17 +76,45 @@ class TrackerDatabase:
                 status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
                 claimed_at TEXT, sent_at TEXT)
             """)
+            db.execute("""CREATE TABLE IF NOT EXISTS alert_journal (
+                address TEXT PRIMARY KEY, token_json TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL,
+                sent_at TEXT, last_error TEXT)
+            """)
             db.execute("""CREATE TABLE IF NOT EXISTS candidate_queue (
                 address TEXT PRIMARY KEY, token_json TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL, claimed_at TEXT, last_error TEXT,
                 completed_at TEXT, result_status TEXT, result_reason TEXT)""")
+            token_columns = {row["name"] for row in db.execute("PRAGMA table_info(tracked_tokens)").fetchall()}
+            if "test_number" not in token_columns:
+                db.execute("ALTER TABLE tracked_tokens ADD COLUMN test_number INTEGER NOT NULL DEFAULT 4")
             # Upgrade databases created before durable per-candidate outcomes were added.
             queue_columns = {row["name"] for row in db.execute("PRAGMA table_info(candidate_queue)").fetchall()}
             if "result_status" not in queue_columns:
                 db.execute("ALTER TABLE candidate_queue ADD COLUMN result_status TEXT")
             if "result_reason" not in queue_columns:
                 db.execute("ALTER TABLE candidate_queue ADD COLUMN result_reason TEXT")
+
+            # Recover an already-full cohort left active by the previous runtime.
+            # Archive all 100 rows before advancing; retain tracked rows as a safety copy.
+            state = db.execute("SELECT test_number FROM tracker_state WHERE id=1").fetchone()
+            cycle = int(state[0]) if state else 4
+            rows = db.execute("SELECT * FROM tracked_tokens WHERE test_number=? ORDER BY id", (cycle,)).fetchall()
+            export_state = db.execute("SELECT status FROM completion_export_queue WHERE id=1").fetchone()
+            # Preserve pending exports; recover legacy full cohorts with no queue row.
+            if len(rows) == MAX_TRADES and (export_state is None or export_state["status"] == "sent"):
+                now = datetime.now(timezone.utc).isoformat()
+                payload = json.dumps([dict(row) for row in rows], sort_keys=True)
+                db.execute("INSERT OR IGNORE INTO completed_cohorts (test_number,completed_at,tokens_json) VALUES (?,?,?)", (cycle, now, payload))
+                archived = db.execute("SELECT tokens_json FROM completed_cohorts WHERE test_number=?", (cycle,)).fetchone()
+                archived_rows = json.loads(archived["tokens_json"]) if archived else []
+                if len(archived_rows) != MAX_TRADES:
+                    raise sqlite3.DatabaseError(f"Refusing to advance: Test {cycle} archive is incomplete")
+                db.execute("UPDATE tracker_state SET test_number=? WHERE id=1", (cycle + 1,))
+                db.execute("INSERT OR IGNORE INTO completion_export_queue (id,status,attempts) VALUES (1,'sent',0)")
+                db.execute("UPDATE completion_export_queue SET status='sent', claimed_at=NULL WHERE id=1")
+                db.execute("DELETE FROM notification_outbox")
 
     def integrity_check(self) -> bool:
         """Return True only when SQLite reports a clean database."""
@@ -110,9 +147,15 @@ class TrackerDatabase:
                 temporary.unlink()
         return target
 
+    def current_test_number(self) -> int:
+        with self._connect() as db:
+            row = db.execute("SELECT test_number FROM tracker_state WHERE id=1").fetchone()
+            return int(row[0]) if row else 4
+
     def count(self) -> int:
         with self._connect() as db:
-            return int(db.execute("SELECT COUNT(*) FROM tracked_tokens").fetchone()[0])
+            cycle = int(db.execute("SELECT test_number FROM tracker_state WHERE id=1").fetchone()[0])
+            return int(db.execute("SELECT COUNT(*) FROM tracked_tokens WHERE test_number=?", (cycle,)).fetchone()[0])
 
     def add_qualified(self, token: dict[str, Any], qualified_at: str) -> str:
         address = str(token.get("address", "")).strip()
@@ -129,16 +172,18 @@ class TrackerDatabase:
         )
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            cycle = int(db.execute("SELECT test_number FROM tracker_state WHERE id=1").fetchone()[0])
             if db.execute("SELECT 1 FROM tracked_tokens WHERE address=?", (address,)).fetchone():
                 return "duplicate"
-            if db.execute("SELECT COUNT(*) FROM tracked_tokens").fetchone()[0] >= MAX_TRADES:
+            cycle_count = int(db.execute("SELECT COUNT(*) FROM tracked_tokens WHERE test_number=?", (cycle,)).fetchone()[0])
+            if cycle_count >= MAX_TRADES:
                 return "full"
             db.execute(
                 """INSERT INTO tracked_tokens
-                (address,symbol,name,initial_mc,peak_mc,current_mc,qualified_at,evidence_json)
-                VALUES (?,?,?,?,?,?,?,?)""",
+                (address,symbol,name,initial_mc,peak_mc,current_mc,qualified_at,evidence_json,test_number)
+                VALUES (?,?,?,?,?,?,?,?,?)""",
                 (address, str(token.get("symbol", "")), str(token.get("name", "")),
-                 mc, mc, mc, qualified_at, evidence),
+                 mc, mc, mc, qualified_at, evidence, cycle),
             )
             db.execute(
                 "INSERT INTO mc_snapshots(address,market_cap,observed_at) VALUES (?,?,?)",
@@ -146,11 +191,13 @@ class TrackerDatabase:
             )
             # Queue milestone messages in the SAME transaction as the token insert.
             # This prevents concurrent qualifying tasks from skipping a boundary.
-            count = int(db.execute("SELECT COUNT(*) FROM tracked_tokens").fetchone()[0])
+            count = cycle_count + 1
             if count == 100:
-                db.execute("INSERT OR IGNORE INTO completion_export_queue(id, status) VALUES (1, 'pending')")
+                db.execute("""INSERT OR IGNORE INTO completion_export_queue(id,status) VALUES (1,'pending')""")
+                db.execute("""UPDATE completion_export_queue SET status='pending',attempts=0,
+                    claimed_at=NULL,sent_at=NULL WHERE id=1""")
             if count in {1, 25, 50, 75, 100}:
-                rows = db.execute("SELECT * FROM tracked_tokens ORDER BY id").fetchall()
+                rows = db.execute("SELECT * FROM tracked_tokens WHERE test_number=? ORDER BY id", (cycle,)).fetchall()
                 payload = json.dumps([dict(row) for row in rows], sort_keys=True)
                 db.execute(
                     "INSERT OR IGNORE INTO notification_outbox(milestone,payload_json) VALUES (?,?)",
@@ -221,18 +268,32 @@ class TrackerDatabase:
             return True
 
     def finish_completion_export(self, *, sent: bool) -> None:
-        """Mark the CSV delivered or release it for a later retry."""
+        """Archive a delivered 100-token cohort, then advance the next test number."""
         with self._connect() as db:
             if sent:
+                now = datetime.now(timezone.utc).isoformat()
                 db.execute(
                     """UPDATE completion_export_queue SET status='sent', sent_at=?,
-                    claimed_at=NULL WHERE id=1""",
-                    (datetime.now(timezone.utc).isoformat(),),
+                    claimed_at=NULL WHERE id=1""", (now,),
                 )
+                cycle = int(db.execute("SELECT test_number FROM tracker_state WHERE id=1").fetchone()[0])
+                rows = db.execute("SELECT * FROM tracked_tokens WHERE test_number=? ORDER BY id", (cycle,)).fetchall()
+                if len(rows) == MAX_TRADES:
+                    payload = json.dumps([dict(row) for row in rows], sort_keys=True)
+                    db.execute("""INSERT OR IGNORE INTO completed_cohorts
+                        (test_number,completed_at,tokens_json) VALUES (?,?,?)""", (cycle, now, payload))
+                    db.execute("DELETE FROM tracked_tokens WHERE test_number=?", (cycle,))
+                    db.execute("DELETE FROM mc_snapshots WHERE address NOT IN (SELECT address FROM tracked_tokens)")
+                    db.execute("DELETE FROM notification_outbox")
+                    db.execute("UPDATE tracker_state SET test_number=? WHERE id=1", (cycle + 1,))
             else:
-                db.execute(
-                    "UPDATE completion_export_queue SET status='pending', claimed_at=NULL WHERE id=1"
-                )
+                db.execute("UPDATE completion_export_queue SET status='pending', claimed_at=NULL WHERE id=1")
+
+    def list_completed_cohorts(self) -> list[dict[str, Any]]:
+        """Return immutable historical cohort journals, oldest first."""
+        with self._connect() as db:
+            rows = db.execute("SELECT test_number,completed_at,tokens_json FROM completed_cohorts ORDER BY test_number").fetchall()
+        return [dict(row) for row in rows]
 
     def pending_completion_export_count(self) -> int:
         with self._connect() as db:
@@ -240,13 +301,51 @@ class TrackerDatabase:
                 "SELECT COUNT(*) FROM completion_export_queue WHERE status!='sent'"
             ).fetchone()[0])
 
+    def prepare_alert(self, token: dict[str, Any]) -> str:
+        """Durably journal an alert before Telegram delivery; return its prior state."""
+        address = str(token.get("address") or "").strip()
+        if not address:
+            return "invalid"
+        payload = json.dumps(token, sort_keys=True, allow_nan=False)
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT status FROM alert_journal WHERE address=?", (address,)).fetchone()
+            if row and row["status"] == "sent":
+                return "sent"
+            db.execute("""INSERT INTO alert_journal(address,token_json,status,created_at)
+                VALUES(?,?,'pending',?) ON CONFLICT(address) DO UPDATE SET
+                token_json=excluded.token_json,status='pending',last_error=NULL""",
+                (address, payload, now))
+            return "pending"
+
+    def finish_alert(self, address: str, *, sent: bool, error: str = "") -> None:
+        """Finalize the durable send journal after Telegram responds."""
+        with self._connect() as db:
+            if sent:
+                db.execute("""UPDATE alert_journal SET status='sent',sent_at=?,last_error=NULL
+                    WHERE address=?""", (datetime.now(timezone.utc).isoformat(), address))
+            else:
+                db.execute("UPDATE alert_journal SET status='failed',last_error=? WHERE address=?",
+                           (str(error)[:300], address))
+
+    def list_sent_alerts(self) -> list[dict[str, Any]]:
+        """Return the permanent journal of successfully delivered token alerts."""
+        with self._connect() as db:
+            rows = db.execute("SELECT * FROM alert_journal WHERE status='sent' ORDER BY sent_at").fetchall()
+        return [dict(row) for row in rows]
+
     def enqueue_candidate(self, token: dict[str, Any]) -> str:
         """Durably queue a scanner alert for evidence evaluation."""
         address = str(token.get("address") or "").strip()
         if not address:
             return "invalid"
-        payload = {"address": address, "name": str(token.get("name") or ""),
-                   "symbol": str(token.get("symbol") or ""), "market_cap": token.get("market_cap")}
+        payload = {
+            "address": address, "name": str(token.get("name") or ""),
+            "symbol": str(token.get("symbol") or ""), "market_cap": token.get("market_cap"),
+            "narrative_evidence": token.get("narrative_evidence") or [],
+            "attention_evidence": token.get("attention_evidence") or [],
+        }
         serialized = json.dumps(payload, sort_keys=True, allow_nan=False)
         now = datetime.now(timezone.utc).isoformat()
         with self._connect() as db:
@@ -343,5 +442,6 @@ class TrackerDatabase:
 
     def list_tokens(self) -> list[dict[str, Any]]:
         with self._connect() as db:
-            rows = db.execute("SELECT * FROM tracked_tokens ORDER BY id").fetchall()
+            cycle = int(db.execute("SELECT test_number FROM tracker_state WHERE id=1").fetchone()[0])
+            rows = db.execute("SELECT * FROM tracked_tokens WHERE test_number=? ORDER BY id", (cycle,)).fetchall()
         return [dict(row) for row in rows]

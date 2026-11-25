@@ -17,10 +17,11 @@ def progress_message(count: int, tokens: list[dict]) -> str | None:
     """Build one notification only at the agreed cohort milestones."""
     if count not in PROGRESS_MILESTONES:
         return None
+    test_number = int(tokens[0].get("test_number", 4)) if tokens else 4
     if count >= 100:
-        return "🏁 FOMO TRACKER TEST 4 COMPLETE\n\n" + build_report(tokens)
+        return f"🏁 FOMO TRACKER TEST {test_number} COMPLETE\n\n" + build_report(tokens)
     return (
-        "📊 FOMO TRACKER TEST 4 UPDATE\n"
+        f"📊 FOMO TRACKER TEST {test_number} UPDATE\n"
         f"Qualified tokens recorded: {count}/100\n"
         f"Next milestone: {min(100, ((count // 25) + 1) * 25)}/100"
     )
