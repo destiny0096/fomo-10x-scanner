@@ -1,4 +1,5 @@
 """SQLite persistence for qualified tokens and market-cap observations."""
+import csv
 import json
 import math
 import os
@@ -288,6 +289,77 @@ class TrackerDatabase:
                     db.execute("UPDATE tracker_state SET test_number=? WHERE id=1", (cycle + 1,))
             else:
                 db.execute("UPDATE completion_export_queue SET status='pending', claimed_at=NULL WHERE id=1")
+
+
+    def recover_completed_cohort_from_export(self, export_path: str | Path) -> bool:
+        """Advance a full cohort only when its existing CSV proves it was exported.
+
+        This repairs the crash window where Telegram accepted the CSV but the
+        process stopped before the SQLite completion transaction committed.
+        """
+        path = Path(export_path).expanduser()
+        if not path.is_file():
+            return False
+        try:
+            with path.open("r", newline="", encoding="utf-8-sig") as handle:
+                exported = list(csv.DictReader(handle))
+        except (OSError, csv.Error, UnicodeError):
+            return False
+        if len(exported) != MAX_TRADES:
+            return False
+        exported_addresses = {str(row.get("address") or "").strip() for row in exported}
+        if len(exported_addresses) != MAX_TRADES:
+            return False
+
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            state = db.execute("SELECT test_number FROM tracker_state WHERE id=1").fetchone()
+            cycle = int(state[0]) if state else 4
+            rows = db.execute(
+                "SELECT * FROM tracked_tokens WHERE test_number=? ORDER BY id", (cycle,)
+            ).fetchall()
+            if len(rows) != MAX_TRADES:
+                return False
+            live_addresses = {str(row["address"]) for row in rows}
+            if live_addresses != exported_addresses:
+                return False
+            export_state = db.execute(
+                "SELECT status FROM completion_export_queue WHERE id=1"
+            ).fetchone()
+            if export_state is None or export_state["status"] == "sent":
+                return False
+            exported_tests = {str(row.get("test_number") or "") for row in exported}
+            if exported_tests != {str(cycle)}:
+                return False
+
+            now = datetime.now(timezone.utc).isoformat()
+            payload = json.dumps([dict(row) for row in rows], sort_keys=True)
+            db.execute(
+                """INSERT OR IGNORE INTO completed_cohorts
+                (test_number,completed_at,tokens_json) VALUES (?,?,?)""",
+                (cycle, now, payload),
+            )
+            archived = db.execute(
+                "SELECT tokens_json FROM completed_cohorts WHERE test_number=?", (cycle,)
+            ).fetchone()
+            archived_rows = json.loads(archived["tokens_json"]) if archived else []
+            if len(archived_rows) != MAX_TRADES or {
+                str(row.get("address") or "") for row in archived_rows
+            } != live_addresses:
+                raise sqlite3.DatabaseError(
+                    f"Refusing to recover Test {cycle}: archive verification failed"
+                )
+            db.execute(
+                """UPDATE completion_export_queue SET status='sent', sent_at=?,
+                claimed_at=NULL WHERE id=1""", (now,)
+            )
+            db.execute("DELETE FROM tracked_tokens WHERE test_number=?", (cycle,))
+            db.execute(
+                "DELETE FROM mc_snapshots WHERE address NOT IN (SELECT address FROM tracked_tokens)"
+            )
+            db.execute("DELETE FROM notification_outbox")
+            db.execute("UPDATE tracker_state SET test_number=? WHERE id=1", (cycle + 1,))
+            return True
 
     def list_completed_cohorts(self) -> list[dict[str, Any]]:
         """Return immutable historical cohort journals, oldest first."""

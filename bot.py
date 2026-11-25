@@ -116,21 +116,43 @@ async def start_health_server():
 # ============================================================
 
 async def get(session, path, params=None):
-    async with session.get(
-        BASE + path,
-        headers=HEAD,
-        params=params,
-        timeout=20,
-    ) as response:
+    """Fetch DexScreener data, respecting short rate-limit retry windows."""
+    for attempt in range(3):
+        async with session.get(
+            BASE + path,
+            headers=HEAD,
+            params=params,
+            timeout=20,
+        ) as response:
+            if response.status == 429:
+                body = (await response.text())[:500]
+                if attempt == 2:
+                    raise RuntimeError(f"DexScreener HTTP 429 after retries: {body}")
+                retry_after = response.headers.get("Retry-After", "")
+                try:
+                    delay = max(1.0, min(30.0, float(retry_after)))
+                except (TypeError, ValueError):
+                    delay = 5.0 * (attempt + 1)
+                logging.warning(
+                    "DexScreener rate limited %s; retrying in %.1fs (attempt %s/3)",
+                    path, delay, attempt + 1,
+                )
+                await asyncio.sleep(delay)
+                continue
 
-        data = await response.json()
+            if response.status >= 400:
+                body = (await response.text())[:500]
+                raise RuntimeError(f"DexScreener HTTP {response.status}: {body}")
 
-        if response.status >= 400:
-            raise RuntimeError(
-                f"{response.status}: {data}"
-            )
+            try:
+                return await response.json()
+            except (aiohttp.ContentTypeError, ValueError) as exc:
+                body = (await response.text())[:500]
+                raise RuntimeError(
+                    f"DexScreener returned invalid JSON for {path}: {body}"
+                ) from exc
 
-        return data
+    raise RuntimeError(f"DexScreener request failed after retries: {path}")
 
 
 async def send_telegram_message(session, chat_id, message):
