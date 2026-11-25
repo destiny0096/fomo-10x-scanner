@@ -1,8 +1,4 @@
-"""Orchestrate address/market-cap qualification and durable cohort recording.
-Narrative and Reddit attention collection are intentionally bypassed for Tracker Test 4.
-Scanner alerts already pass scanner-side qualification; this component records them
-when address and valid starting market-cap data are present.
-"""
+"""Evidence-first qualification and durable tracker recording."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -37,10 +33,16 @@ async def evaluate_candidate(
 
     candidate = {**token, "address": address, "market_cap": market_cap}
     try:
-        collector = evidence_collector or collect_token_evidence
-        evidence = await collector(
-            address, str(token.get("name") or ""), str(token.get("symbol") or "")
-        )
+        if "narrative_evidence" in token and "attention_evidence" in token:
+            evidence = {
+                "narrative_evidence": token.get("narrative_evidence") or [],
+                "attention_evidence": token.get("attention_evidence") or [],
+            }
+        else:
+            collector = evidence_collector or collect_token_evidence
+            evidence = await collector(
+                address, str(token.get("name") or ""), str(token.get("symbol") or "")
+            )
     except EvidenceSourceUnavailable as exc:
         return {"status": "evidence_error", "reason": str(exc), "candidate": candidate}
     except Exception as exc:
