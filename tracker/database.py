@@ -260,7 +260,7 @@ class TrackerDatabase:
                 rows = db.execute("SELECT * FROM tracked_tokens WHERE test_number=? ORDER BY id", (cycle,)).fetchall()
                 if len(rows) == MAX_TRADES:
                     payload = json.dumps([dict(row) for row in rows], sort_keys=True)
-                    db.execute("""INSERT OR REPLACE INTO completed_cohorts
+                    db.execute("""INSERT OR IGNORE INTO completed_cohorts
                         (test_number,completed_at,tokens_json) VALUES (?,?,?)""", (cycle, now, payload))
                     db.execute("DELETE FROM tracked_tokens WHERE test_number=?", (cycle,))
                     db.execute("DELETE FROM mc_snapshots WHERE address NOT IN (SELECT address FROM tracked_tokens)")
