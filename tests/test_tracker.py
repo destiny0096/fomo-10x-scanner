@@ -460,6 +460,9 @@ class RecurringCohortAndJournalTests(unittest.TestCase):
             self.assertEqual(history[0]["test_number"], 4)
             self.assertEqual(len(__import__("json").loads(history[0]["tokens_json"])), 100)
 
+            with db._connect() as connection:
+                connection.execute("DELETE FROM completion_export_queue WHERE id=1")
+
             reopened = TrackerDatabase(path)
             self.assertEqual(reopened.current_test_number(), 5)
             self.assertEqual(reopened.add_qualified(
