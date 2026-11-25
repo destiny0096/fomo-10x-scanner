@@ -60,6 +60,9 @@ class TrackerDatabase:
                 id INTEGER PRIMARY KEY CHECK(id=1), test_number INTEGER NOT NULL DEFAULT 4)
             """)
             db.execute("INSERT OR IGNORE INTO tracker_state(id,test_number) VALUES (1,4)")
+            state_columns = {row["name"] for row in db.execute("PRAGMA table_info(tracker_state)").fetchall()}
+            if "test5_reset_done" not in state_columns:
+                db.execute("ALTER TABLE tracker_state ADD COLUMN test5_reset_done INTEGER NOT NULL DEFAULT 0")
             db.execute("""CREATE TABLE IF NOT EXISTS completed_cohorts (
                 test_number INTEGER PRIMARY KEY, completed_at TEXT NOT NULL,
                 tokens_json TEXT NOT NULL)
@@ -116,6 +119,41 @@ class TrackerDatabase:
                 db.execute("INSERT OR IGNORE INTO completion_export_queue (id,status,attempts) VALUES (1,'sent',0)")
                 db.execute("UPDATE completion_export_queue SET status='sent', claimed_at=NULL WHERE id=1")
                 db.execute("DELETE FROM notification_outbox")
+
+    def reset_test4_to_test5(self) -> bool:
+        """Back up the live DB, then remove Test 4 data and activate a clean Test 5 once."""
+        with self._connect() as db:
+            state = db.execute("SELECT test_number, test5_reset_done FROM tracker_state WHERE id=1").fetchone()
+            if state is None or int(state["test5_reset_done"] or 0) == 1:
+                return False
+            cycle = int(state["test_number"])
+            if cycle not in {4, 5}:
+                return False
+            old_rows = db.execute("SELECT address FROM tracked_tokens WHERE test_number=4").fetchall()
+            old_archive = db.execute("SELECT 1 FROM completed_cohorts WHERE test_number=4").fetchone()
+            if cycle == 5 and not old_rows and not old_archive:
+                return False
+
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        backup_path = self.path.parent / "tracker_backups" / ("tracker-before-test5-reset-" + stamp + ".db")
+        self.backup_to(backup_path)
+
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            state = db.execute("SELECT test_number, test5_reset_done FROM tracker_state WHERE id=1").fetchone()
+            if state is None or int(state["test5_reset_done"] or 0) == 1 or int(state["test_number"]) not in {4, 5}:
+                return False
+            addresses = [str(row[0]) for row in db.execute("SELECT address FROM tracked_tokens WHERE test_number=4").fetchall()]
+            db.execute("DELETE FROM tracked_tokens WHERE test_number=4")
+            if addresses:
+                marks = ",".join("?" for _ in addresses)
+                db.execute("DELETE FROM mc_snapshots WHERE address IN (" + marks + ")", addresses)
+            db.execute("DELETE FROM notification_outbox")
+            db.execute("DELETE FROM candidate_queue")
+            db.execute("DELETE FROM completed_cohorts WHERE test_number=4")
+            db.execute("INSERT INTO completion_export_queue (id,status,attempts,claimed_at,sent_at) VALUES (1,'sent',0,NULL,NULL) ON CONFLICT(id) DO UPDATE SET status='sent',claimed_at=NULL")
+            db.execute("UPDATE tracker_state SET test_number=5, test5_reset_done=1 WHERE id=1")
+        return True
 
     def integrity_check(self) -> bool:
         """Return True only when SQLite reports a clean database."""
