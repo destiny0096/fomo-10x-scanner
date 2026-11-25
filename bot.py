@@ -12,7 +12,6 @@ from security_test import check_security, security_summary
 from lp_test import check_lp_status, lp_status_text
 from sell_route_test import check_sell_route, sell_route_text
 from tracker.integration import deliver_pending_notifications, drain_tracking_tasks, resume_pending_tracking, schedule_tracking
-from tracker.pipeline import evaluate_candidate
 from tracker.database import TrackerDatabase
 from tracker.market_monitor import market_cap_monitor
 
@@ -681,34 +680,16 @@ async def evaluate_pair(session, pair):
         address,
     )
 
-    # Narrative and attention are mandatory gates BEFORE Telegram distribution.
-    # Keep the scanner's existing FDV fallback for alert eligibility. The tracker
-    # receives reported marketCap only below and rejects missing MC rather than FDV.
-    evidence_result = await evaluate_candidate({
+    # Scanner alerts depend only on the established market, momentum,
+    # security, LP and sell-route checks above. Public narrative/social
+    # evidence is NOT a delivery gate: Reddit coverage is sparse for Solana
+    # meme coins and must never suppress an otherwise-qualified alert.
+    qualified_token = {
         "address": address,
         "name": token.get("name", ""),
         "symbol": token.get("symbol", ""),
-        "market_cap": mc,
-    })
-    if evidence_result.get("status") != "qualified":
-        logging.info(
-            "REJECT %s: narrative/attention gate status=%s reason=%s",
-            token.get("symbol"), evidence_result.get("status"),
-            evidence_result.get("reason", ""),
-        )
-        return False
-
-    qualified_token = evidence_result["candidate"]
-    narrative_lines = qualified_token.get("narrative_evidence") or []
-    attention_lines = qualified_token.get("attention_evidence") or []
-    narrative_text = "\n".join(
-        f"• {item.get('source', 'Source')}: {item.get('summary', '')}"
-        for item in narrative_lines if isinstance(item, dict)
-    )
-    attention_text = "\n".join(
-        f"• {item.get('source', 'Source')}: {item.get('summary', '')}"
-        for item in attention_lines if isinstance(item, dict)
-    )
+        "market_cap": pair.get("marketCap"),
+    }
 
     message = (
         alert(
@@ -721,15 +702,11 @@ async def evaluate_pair(session, pair):
             momentum,
             buy_pressure,
         )
-        + "\n\n🧠 NARRATIVE CHECK — PASS\n"
-        + narrative_text
-        + "\n\n👀 ATTENTION CHECK — PASS\n"
-        + attention_text
-        + "\n\n🛡️ SECURITY\n"
+        + "\\n\\n🛡️ SECURITY\\n"
         + security_summary(security)
-        + "\n\n"
+        + "\\n\\n"
         + lp_status_text(lp_status)
-        + "\n\n"
+        + "\\n\\n"
         + sell_route_text(sell_status)
     )
 

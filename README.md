@@ -1,12 +1,13 @@
-# FOMO 10X Scanner + Tracker Test 4
+# FOMO 10X Scanner + Tracker Test 5
 
-Solana token-discovery and Telegram alert scanner, with a separate evidence-gated 100-token performance tracker.
+Solana token-discovery and Telegram alert scanner, with a separate 100-token performance tracker.
 
 ## Current development status
 
 - Tracker development branch: `feature/fomo-tracker-test-4`.
 - The existing scanner remains the discovery and alert system; the tracker is a separate component.
-- The tracker records a token only when BOTH narrative and public-attention evidence pass.
+- Existing scanner filters decide which tokens receive Telegram alerts; no Reddit or narrative gate can suppress those alerts.
+- The tracker records successfully alerted tokens when their mint address and reported market cap are valid.
 - Tracker cohort cap: exactly 100 qualified tokens.
 - Scanner filters and alert behavior are not replaced by the tracker.
 - Do not merge or deploy until the release checks in [DEPLOYMENT.md](DEPLOYMENT.md) are complete and explicitly approved.
@@ -19,7 +20,7 @@ Start command:
 python bot.py
 ```
 
-The health server listens on `PORT` (default `3000`) and responds at `/` and `/health`. This is a process-liveness check, not proof that Telegram, DexScreener, Reddit, or persistent storage is healthy.
+The health server listens on `PORT` (default `3000`) and responds at `/` and `/health`. This is a process-liveness check, not proof that Telegram, DexScreener, or persistent storage is healthy.
 
 ## Required environment variables
 
@@ -54,12 +55,10 @@ Do not add a Birdeye key for this version; the scanner's current market-data sou
 ## Data and evidence limitations
 
 - DexScreener supplies market data and token metadata.
-- Public project-site descriptions and Reddit public search are the free v1 narrative/attention evidence adapters. No paid X API is used.
-- These are heuristic public signals, not proof of organic engagement or a guarantee of token quality.
+- Reddit and X are not required dependencies for alerts or tracker qualification. No paid X API is used.
 - Tracker records reported DexScreener `marketCap` only; it never substitutes FDV for tracker market cap.
 - Market-cap peaks are sampled at the configured interval; brief moves between polls can be missed.
 - The tracker queue substantially improves restart recovery, but there is a narrow gap between Telegram confirming an alert and the subsequent durable queue write. Database failure in that interval can leave an alert uncaptured by the tracker.
-- Temporary evidence-source failures (DNS/connectivity errors, timeouts, HTTP 408/425/429, and HTTP 5xx) are deferred for retry; they are not treated as failed narrative or attention evidence. Permanent no-result responses can still lead to a genuine qualification rejection.
 - Tracker logs report the exact SQLite database path, qualified-token count, candidate-queue counts (pending/processing/completed), and recent candidate outcomes. `Tracking ... candidates` is explicitly a scanner-only in-memory discovery counter, not the durable tracker queue.
 - Milestone notifications use an at-least-once outbox, so a rare duplicate is possible if the process crashes after Telegram accepts a message but before the database records delivery.
 
