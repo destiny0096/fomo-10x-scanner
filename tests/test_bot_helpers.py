@@ -197,3 +197,58 @@ class ScannerTrackerEndToEndTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(address, bot.alerted)
             self.assertIn(address, bot.candidates)
             self.assertEqual(TrackerDatabase(db_path).pending_candidate_count(), 0)
+
+    async def test_tracker_journal_storage_failure_does_not_block_scanner_alert(self):
+        pair = {
+            "chainId": "solana",
+            "baseToken": {"address": "MintJournalDiskDown", "name": "Example", "symbol": "EX"},
+            "marketCap": 50000,
+            "liquidity": {"usd": 10000},
+            "volume": {"h24": 10000, "m5": 5000},
+            "txns": {"h24": {"buys": 30, "sells": 10}, "m5": {"buys": 8, "sells": 2}},
+            "priceChange": {"m5": 15},
+        }
+        address = "MintJournalDiskDown"
+        bot.alerted.discard(address)
+        bot.candidates[address] = 1
+        with patch.object(bot, "evaluate_candidate", new=AsyncMock(side_effect=passing_precheck)), \
+             patch.object(bot, "check_security", new=AsyncMock(return_value={})), \
+             patch.object(bot, "check_lp_status", new=AsyncMock(return_value="BURNED")), \
+             patch.object(bot, "check_sell_route", new=AsyncMock(return_value="OK")), \
+             patch.object(bot, "security_summary", return_value="Security checked"), \
+             patch.object(bot, "lp_status_text", return_value="LP checked"), \
+             patch.object(bot, "sell_route_text", return_value="Sell route checked"), \
+             patch.object(bot, "TrackerDatabase", side_effect=OSError("persistent disk unavailable")), \
+             patch.object(bot, "tg", new=AsyncMock(return_value=None)) as telegram, \
+             patch.object(bot, "schedule_tracking", return_value=False):
+            sent = await bot.evaluate_pair(object(), pair)
+        self.assertTrue(sent)
+        telegram.assert_awaited_once()
+        self.assertIn(address, bot.alerted)
+
+    async def test_narrative_or_attention_rejection_prevents_scanner_alert(self):
+        pair = {
+            "chainId": "solana",
+            "baseToken": {"address": "MintNoEvidence", "name": "Example", "symbol": "EX"},
+            "marketCap": 50000,
+            "liquidity": {"usd": 10000},
+            "volume": {"h24": 10000, "m5": 5000},
+            "txns": {"h24": {"buys": 30, "sells": 10}, "m5": {"buys": 8, "sells": 2}},
+            "priceChange": {"m5": 15},
+        }
+        address = "MintNoEvidence"
+        bot.alerted.discard(address)
+        bot.candidates[address] = 1
+        with patch.object(bot, "evaluate_candidate", new=AsyncMock(return_value={
+                "status": "rejected", "reason": "No verifiable narrative or public discussion"
+        })) as evaluate, \
+             patch.object(bot, "check_security", new=AsyncMock(return_value={})), \
+             patch.object(bot, "check_lp_status", new=AsyncMock(return_value="BURNED")), \
+             patch.object(bot, "check_sell_route", new=AsyncMock(return_value="OK")), \
+             patch.object(bot, "tg", new=AsyncMock(return_value=None)) as telegram:
+            sent = await bot.evaluate_pair(object(), pair)
+        self.assertFalse(sent)
+        evaluate.assert_awaited_once()
+        telegram.assert_not_awaited()
+        self.assertNotIn(address, bot.alerted)
+        self.assertIn(address, bot.candidates)
