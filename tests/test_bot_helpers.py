@@ -136,9 +136,6 @@ class ScannerTrackerEndToEndTests(unittest.IsolatedAsyncioTestCase):
             bot.alerted.discard(address)
             bot.candidates[address] = 1
             with patch.dict(os.environ, {"TRACKER_DB_PATH": str(db_path)}), \
-                 patch.object(bot, "evaluate_candidate", new=AsyncMock(side_effect=lambda token: __import__("asyncio").sleep(0, result={
-                     "status": "qualified", "candidate": {**token, "narrative_evidence": narrative,
-                     "attention_evidence": attention}, "reason": "both checks passed"}))), \
                  patch.object(bot, "evaluate_candidate", new=AsyncMock(side_effect=passing_precheck)), \
                  patch.object(bot, "check_security", new=AsyncMock(return_value={})), \
                  patch.object(bot, "check_lp_status", new=AsyncMock(return_value="BURNED")), \
@@ -184,6 +181,7 @@ class ScannerTrackerEndToEndTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             db_path = Path(directory) / "tracker.db"
             with patch.dict(os.environ, {"TRACKER_DB_PATH": str(db_path)}), \
+                 patch.object(bot, "evaluate_candidate", new=AsyncMock(side_effect=passing_precheck)), \
                  patch.object(bot, "check_security", new=AsyncMock(return_value={})), \
                  patch.object(bot, "check_lp_status", new=AsyncMock(return_value="BURNED")), \
                  patch.object(bot, "check_sell_route", new=AsyncMock(return_value="OK")), \
