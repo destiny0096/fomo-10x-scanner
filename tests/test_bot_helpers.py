@@ -266,15 +266,15 @@ class ScannerTrackerEndToEndTests(unittest.IsolatedAsyncioTestCase):
         address = "MintFdvOnly"
         bot.alerted.discard(address)
         bot.candidates[address] = 1
-        with patch.object(bot, "evaluate_candidate", new=AsyncMock(side_effect=passing_precheck)) as evaluate, \\
-             patch.object(bot, "check_security", new=AsyncMock(return_value={})), \\
-             patch.object(bot, "check_lp_status", new=AsyncMock(return_value="BURNED")), \\
-             patch.object(bot, "check_sell_route", new=AsyncMock(return_value="OK")), \\
-             patch.object(bot, "security_summary", return_value="Security checked"), \\
-             patch.object(bot, "lp_status_text", return_value="LP checked"), \\
-             patch.object(bot, "sell_route_text", return_value="Sell route checked"), \\
-             patch.object(bot, "TrackerDatabase") as database, \\
-             patch.object(bot, "tg", new=AsyncMock(return_value=None)) as telegram, \\
+        with patch.object(bot, "evaluate_candidate", new=AsyncMock(side_effect=passing_precheck)) as evaluate, \
+             patch.object(bot, "check_security", new=AsyncMock(return_value={})), \
+             patch.object(bot, "check_lp_status", new=AsyncMock(return_value="BURNED")), \
+             patch.object(bot, "check_sell_route", new=AsyncMock(return_value="OK")), \
+             patch.object(bot, "security_summary", return_value="Security checked"), \
+             patch.object(bot, "lp_status_text", return_value="LP checked"), \
+             patch.object(bot, "sell_route_text", return_value="Sell route checked"), \
+             patch.object(bot, "TrackerDatabase") as database, \
+             patch.object(bot, "tg", new=AsyncMock(return_value=None)) as telegram, \
              patch.object(bot, "schedule_tracking", return_value=True) as schedule:
             database.return_value.prepare_alert.return_value = "pending"
             sent = await bot.evaluate_pair(object(), pair)
