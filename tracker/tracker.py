@@ -1,9 +1,7 @@
-"""Qualification contract shared by scanner and tracker components."""
+"""Qualification contract for scanner-alerted tokens in the tracker."""
 from dataclasses import dataclass
+import math
 from typing import Any
-
-from .narrative import check_narrative
-from .attention import check_attention
 
 
 @dataclass(frozen=True)
@@ -15,20 +13,27 @@ class QualificationResult:
 
 
 def qualify_token(token: dict[str, Any]) -> QualificationResult:
-    """Require a mint address plus verifiable narrative and public attention."""
+    """Require only a mint address and valid positive reported market cap.
+
+    Narrative and social attention are deliberately informational only. They
+    are not reliable mandatory gates for newly launched Solana meme coins.
+    """
     address = str(token.get("address", "")).strip()
-    narrative_pass, narrative_reasons = check_narrative(token.get("narrative_evidence"))
-    attention_pass, attention_reasons = check_attention(token.get("attention_evidence"))
+    try:
+        market_cap = float(token.get("market_cap") or 0)
+    except (TypeError, ValueError, OverflowError):
+        market_cap = 0.0
+    valid_market_cap = math.isfinite(market_cap) and market_cap > 0
     reasons = []
     if not address:
         reasons.append("Rejected: missing mint address.")
-    reasons.extend(narrative_reasons)
-    reasons.extend(attention_reasons)
-    if address and narrative_pass and attention_pass:
-        reasons.insert(0, "Accepted: narrative and attention checks passed.")
+    if not valid_market_cap:
+        reasons.append("Rejected: missing or invalid reported market cap.")
+    if address and valid_market_cap:
+        reasons.append("Accepted: mint address and reported market cap are valid.")
     return QualificationResult(
-        bool(address and narrative_pass and attention_pass),
-        narrative_pass,
-        attention_pass,
+        bool(address and valid_market_cap),
+        True,
+        True,
         tuple(reasons),
     )
