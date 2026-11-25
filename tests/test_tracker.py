@@ -17,12 +17,11 @@ ATTENTION = [{"source":"Reddit public search","url":"https://www.reddit.com/r/ex
 
 
 class QualificationTests(unittest.TestCase):
-    def test_narrative_and_attention_are_not_required(self):
+    def test_narrative_and_attention_are_required(self):
         result = qualify_token({"address": "Mint111"})
-        self.assertTrue(result.qualified)
-        self.assertTrue(result.narrative_pass)
-        self.assertTrue(result.attention_pass)
-        self.assertIn("checks disabled", " ".join(result.reasons).lower())
+        self.assertFalse(result.qualified)
+        self.assertFalse(result.narrative_pass)
+        self.assertFalse(result.attention_pass)
 
     def test_missing_address_is_rejected(self):
         self.assertFalse(qualify_token({"market_cap": 10000}).qualified)
@@ -304,7 +303,9 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(db.enqueue_candidate(token), "queued")
             reopened = TrackerDatabase(path)
             self.assertEqual(reopened.pending_candidate_count(), 1)
-            self.assertEqual(reopened.claim_next_candidate(), token)
+            self.assertEqual(reopened.claim_next_candidate(), {
+                **token, "narrative_evidence": [], "attention_evidence": []
+            })
             reopened.retry_candidate("QueuedMint", "simulated interruption")
             self.assertEqual(TrackerDatabase(path).pending_candidate_count(), 1)
 
