@@ -96,6 +96,24 @@ class TrackerDatabase:
             if "result_reason" not in queue_columns:
                 db.execute("ALTER TABLE candidate_queue ADD COLUMN result_reason TEXT")
 
+            # Recover an already-full cohort left active by the previous runtime.
+            # Archive all 100 rows before advancing; retain tracked rows as a safety copy.
+            state = db.execute("SELECT test_number FROM tracker_state WHERE id=1").fetchone()
+            cycle = int(state[0]) if state else 4
+            rows = db.execute("SELECT * FROM tracked_tokens WHERE test_number=? ORDER BY id", (cycle,)).fetchall()
+            if len(rows) == MAX_TRADES:
+                now = datetime.now(timezone.utc).isoformat()
+                payload = json.dumps([dict(row) for row in rows], sort_keys=True)
+                db.execute("INSERT OR IGNORE INTO completed_cohorts (test_number,completed_at,tokens_json) VALUES (?,?,?)", (cycle, now, payload))
+                archived = db.execute("SELECT tokens_json FROM completed_cohorts WHERE test_number=?", (cycle,)).fetchone()
+                archived_rows = json.loads(archived["tokens_json"]) if archived else []
+                if len(archived_rows) != MAX_TRADES:
+                    raise sqlite3.DatabaseError(f"Refusing to advance: Test {cycle} archive is incomplete")
+                db.execute("UPDATE tracker_state SET test_number=? WHERE id=1", (cycle + 1,))
+                db.execute("INSERT OR IGNORE INTO completion_export_queue (id,status,attempts) VALUES (1,\"sent\",0)")
+                db.execute("UPDATE completion_export_queue SET status=\"sent\", claimed_at=NULL WHERE id=1")
+                db.execute("DELETE FROM notification_outbox")
+
     def integrity_check(self) -> bool:
         """Return True only when SQLite reports a clean database."""
         with self._connect() as db:
