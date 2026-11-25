@@ -4,7 +4,7 @@ Run inside the deployment container after host secrets are configured. Deplexo's
 persistent /data mount is detected automatically; other hosts can set paths:
     python -m tracker.preflight
 
-This performs read-only Telegram/DexScreener/Reddit API checks and a temporary
+This performs read-only Telegram/DexScreener API checks and a temporary
 SQLite backup write test. It never sends a Telegram message and never prints
 secrets.
 """
@@ -22,7 +22,6 @@ import aiohttp
 from .database import TrackerDatabase
 
 DEX_URL = "https://api.dexscreener.com/token-profiles/latest/v1"
-REDDIT_URL = "https://www.reddit.com/search.json"
 TELEGRAM_API = "https://api.telegram.org"
 
 
@@ -113,7 +112,6 @@ async def check_services(env: Mapping[str, str] | None = None) -> list[tuple[str
             ("Telegram bot authentication", f"{TELEGRAM_API}/bot{token}/getMe", None),
             ("Telegram destination access", f"{TELEGRAM_API}/bot{token}/getChat", {"chat_id": chat_id}),
             ("DexScreener API", DEX_URL, None),
-            ("Reddit public attention source", REDDIT_URL, {"q": "solana", "sort": "new", "t": "week", "limit": "1"}),
         ):
             try:
                 headers = {"User-Agent": "FOMO10XTracker/1.0 (deployment preflight)"}
@@ -125,8 +123,6 @@ async def check_services(env: Mapping[str, str] | None = None) -> list[tuple[str
                     if label.startswith("Telegram") and not payload.get("ok"):
                         results.append((label, False, "Telegram API rejected the read-only check."))
                     elif label == "DexScreener API" and not isinstance(payload, (list, dict)):
-                        results.append((label, False, "Unexpected response format."))
-                    elif label == "Reddit public attention source" and not isinstance(payload, dict):
                         results.append((label, False, "Unexpected response format."))
                     else:
                         results.append((label, True, "Read-only API check succeeded."))
