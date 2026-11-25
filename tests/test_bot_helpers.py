@@ -11,6 +11,23 @@ with patch.dict(os.environ, {
 }):
     import bot
 
+PASSING_NARRATIVE = [{
+    "source": "Project website", "url": "https://example.org/about",
+    "summary": "A community-led project building open tools for creators and digital culture.",
+    "observed_at": "2026-11-25T10:00:00Z",
+}]
+PASSING_ATTENTION = [{
+    "source": "Reddit public search", "url": "https://www.reddit.com/r/example/comments/abc/post",
+    "summary": "A recent public discussion directly references this token and project.",
+    "observed_at": "2026-11-25T10:01:00Z",
+}]
+
+async def passing_precheck(token):
+    return {"status": "qualified", "candidate": {
+        **token, "narrative_evidence": PASSING_NARRATIVE,
+        "attention_evidence": PASSING_ATTENTION,
+    }, "reason": "narrative and attention passed"}
+
 
 class BestSolanaPairsTests(unittest.TestCase):
     def test_ignores_malformed_entries_without_aborting_batch(self):
@@ -52,7 +69,11 @@ class ScannerTrackerIsolationTests(unittest.IsolatedAsyncioTestCase):
         bot.alerted.discard(address)
         bot.candidates[address] = 1
 
-        with patch.object(bot, "check_security", new=AsyncMock(return_value={})), \
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.dict(os.environ, {"TRACKER_DB_PATH": str(__import__("pathlib").Path(directory) / "journal.db")}), \
+             patch.object(bot, "evaluate_candidate", new=AsyncMock(side_effect=passing_precheck)), \
+             patch.object(bot, "check_security", new=AsyncMock(return_value={})), \
              patch.object(bot, "check_lp_status", new=AsyncMock(return_value="BURNED")), \
              patch.object(bot, "check_sell_route", new=AsyncMock(return_value="OK")), \
              patch.object(bot, "security_summary", return_value="Security checked"), \
@@ -92,13 +113,11 @@ class ScannerTrackerEndToEndTests(unittest.IsolatedAsyncioTestCase):
             "observed_at": "2026-11-10T10:01:00Z",
         }]
 
-        async def passing_collector(**_kwargs):
+        async def passing_collector(_address, _name, _symbol):
             return {"narrative_evidence": narrative, "attention_evidence": attention}
 
         async def real_pipeline_with_test_evidence(token, database):
-            return await evaluate_and_record(
-                token, database=database, evidence_collector=passing_collector
-            )
+            return await evaluate_and_record(token, database=database)
 
         pair = {
             "chainId": "solana",
@@ -117,6 +136,10 @@ class ScannerTrackerEndToEndTests(unittest.IsolatedAsyncioTestCase):
             bot.alerted.discard(address)
             bot.candidates[address] = 1
             with patch.dict(os.environ, {"TRACKER_DB_PATH": str(db_path)}), \
+                 patch.object(bot, "evaluate_candidate", new=AsyncMock(side_effect=lambda token: __import__("asyncio").sleep(0, result={
+                     "status": "qualified", "candidate": {**token, "narrative_evidence": narrative,
+                     "attention_evidence": attention}, "reason": "both checks passed"}))), \
+                 patch.object(bot, "evaluate_candidate", new=AsyncMock(side_effect=passing_precheck)), \
                  patch.object(bot, "check_security", new=AsyncMock(return_value={})), \
                  patch.object(bot, "check_lp_status", new=AsyncMock(return_value="BURNED")), \
                  patch.object(bot, "check_sell_route", new=AsyncMock(return_value="OK")), \
