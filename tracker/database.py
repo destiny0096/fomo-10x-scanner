@@ -110,8 +110,8 @@ class TrackerDatabase:
                 if len(archived_rows) != MAX_TRADES:
                     raise sqlite3.DatabaseError(f"Refusing to advance: Test {cycle} archive is incomplete")
                 db.execute("UPDATE tracker_state SET test_number=? WHERE id=1", (cycle + 1,))
-                db.execute("INSERT OR IGNORE INTO completion_export_queue (id,status,attempts) VALUES (1,\"sent\",0)")
-                db.execute("UPDATE completion_export_queue SET status=\"sent\", claimed_at=NULL WHERE id=1")
+                db.execute("INSERT OR IGNORE INTO completion_export_queue (id,status,attempts) VALUES (1,'sent',0)")
+                db.execute("UPDATE completion_export_queue SET status='sent', claimed_at=NULL WHERE id=1")
                 db.execute("DELETE FROM notification_outbox")
 
     def integrity_check(self) -> bool:
