@@ -201,25 +201,42 @@ def telegram_command_response(text):
 
     if command == "/start":
         return (
-            "Welcome to FOMO 10X Scanner! 🚀\n\n"
-            "This bot delivers automated Solana memecoin watch alerts. "
-            "It monitors market cap, liquidity, trading volume, buying "
-            "pressure, momentum and token security.\n\n"
-            "When a token meets the scanner's filters, an alert is sent "
-            "with its market data and security checks.\n\n"
-            "Use /help to see what this bot does. "
-            "This is an alert and research tool, not an exchange or "
-            "guarantee of trading results."
+            "🚀 Welcome to FOMO 10X Scanner!\n\n"
+            "FOMO 10X is an automated Solana memecoin scanning and research platform.\n\n"
+            "It monitors market cap, liquidity, trading volume, buying pressure, momentum and token security to identify potential opportunities.\n\n"
+            "Features include:\n"
+            "📡 Automated token scanning and watch alerts.\n"
+            "📊 Performance tracking through our 100-token testing cohorts.\n"
+            "🧠 Narrative and attention research to help evaluate emerging tokens.\n"
+            "🔐 Token security, liquidity-pool and sell-route checks.\n\n"
+            "Use /help to explore the platform.\n\n"
+            "FOMO 10X — Scan. Track. Research."
         )
 
     if command == "/help":
         return (
-            "FOMO 10X Scanner — Help\n\n"
-            "The bot automatically sends filtered Solana token alerts. "
-            "Alerts include market cap, liquidity, 24-hour volume, "
-            "buying pressure, 5-minute momentum, scanner score, "
-            "token security, liquidity-pool status and sell-route checks.\n\n"
-            "There are no manual trading or buy/sell commands."
+            "🚀 FOMO 10X Scanner — Help\n\n"
+            "FOMO 10X is an automated Solana memecoin scanning and research platform.\n\n"
+            "CORE FEATURES\n\n"
+            "1. 📡 AUTOMATED SCANNER\n"
+            "Automatically monitors Solana tokens and sends filtered alerts containing:\n"
+            "• Market cap\n"
+            "• Liquidity\n"
+            "• 24-hour trading volume\n"
+            "• Buying pressure\n"
+            "• 5-minute momentum\n"
+            "• Scanner score\n\n"
+            "2. 📊 PERFORMANCE TRACKER\n"
+            "Records qualified tokens in 100-token testing cohorts and monitors their market-cap performance over time.\n\n"
+            "3. 🧠 NARRATIVE & ATTENTION RESEARCH\n"
+            "Designed to evaluate token narratives, emerging trends and market attention as an additional research layer.\n\n"
+            "4. 🔐 TOKEN SECURITY\n"
+            "Checks token authorities, liquidity-pool status and sell-route availability.\n\n"
+            "COMMANDS\n"
+            "/start — Welcome message\n"
+            "/help — Platform guide\n\n"
+            "Scanner alerts and tracking operate automatically. No manual buy or sell commands are available.\n\n"
+            "FOMO 10X — Scan. Track. Research."
         )
 
     return None
