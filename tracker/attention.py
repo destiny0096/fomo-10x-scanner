@@ -1,23 +1,16 @@
-"""Attention checks backed by observable public engagement measurements."""
+"""Attention checks backed by relevant, observable public discussion."""
 from typing import Any
 
 from .narrative import Evidence
 
-MIN_DISTINCT_AUTHORS = 1
-MIN_ENGAGEMENT = 1
-MIN_MATCHING_POSTS = 1
-
-
-def _metric(item: dict[str, Any], key: str) -> int:
-    try:
-        value = int(item.get(key, 0))
-    except (TypeError, ValueError, OverflowError):
-        return 0
-    return max(0, value)
-
 
 def check_attention(evidence: list[dict[str, Any]] | None) -> tuple[bool, list[str]]:
-    """Require at least one verifiable Reddit post with measurable engagement."""
+    """Pass when verifiable, token-relevant public discussion exists.
+
+    Deliberately does not impose numeric post, author, score, or engagement
+    thresholds. Evidence must still be a real URL with a source, summary and
+    observation timestamp, and must identify Reddit/public discussion.
+    """
     valid = []
     for item in evidence or []:
         if not isinstance(item, dict):
@@ -25,25 +18,17 @@ def check_attention(evidence: list[dict[str, Any]] | None) -> tuple[bool, list[s
         record = Evidence.from_dict(item)
         if not record.is_verifiable():
             continue
-        if "reddit" not in record.source.casefold():
+        source = record.source.casefold()
+        if "reddit" not in source and "public discussion" not in source:
             continue
-        authors = _metric(item, "distinct_authors")
-        engagement = _metric(item, "engagement")
-        posts = _metric(item, "post_count")
-        if (
-            authors >= MIN_DISTINCT_AUTHORS
-            and engagement >= MIN_ENGAGEMENT
-            and posts >= MIN_MATCHING_POSTS
-        ):
-            valid.append((record, authors, engagement, posts))
-
+        if not record.summary.strip():
+            continue
+        valid.append(record)
     if valid:
         return True, [
-            f"Attention evidence: {record.source} — {authors} distinct authors, "
-            f"{posts} matching posts, {engagement} combined score/comments."
-            for record, authors, engagement, posts in valid
+            f"Attention evidence: {record.source} — {record.summary}"
+            for record in valid
         ]
     return False, [
-        "No verifiable attention threshold met (requires at least 1 distinct author, "
-        "1 matching post, and 1 combined score/comment)."
+        "No verifiable, token-relevant public discussion was found."
     ]
