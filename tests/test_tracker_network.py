@@ -62,34 +62,31 @@ class EvidenceSourceRetryTests(unittest.IsolatedAsyncioTestCase):
         result = await _get_json(_Session(status=404), "https://api.example.test/data")
         self.assertIsNone(result)
 
-    async def test_pipeline_ignores_evidence_collector_and_records_valid_candidate(self):
-        async def unavailable_collector(**_kwargs):
+    async def test_pipeline_defers_candidate_when_evidence_source_is_unavailable(self):
+        async def unavailable_collector(*_args):
             raise EvidenceSourceUnavailable("temporary DNS failure")
 
         with tempfile.TemporaryDirectory() as directory:
             db = TrackerDatabase(Path(directory) / "tracker.db")
             result = await evaluate_and_record(
                 {"address": "RetryMint", "market_cap": 12000},
-                database=db,
-                evidence_collector=unavailable_collector,
+                database=db, evidence_collector=unavailable_collector,
             )
-            self.assertEqual(result["status"], "qualified")
-            self.assertEqual(db.count(), 1)
-            self.assertEqual(db.list_tokens()[0]["address"], "RetryMint")
+            self.assertEqual(result["status"], "evidence_error")
+            self.assertEqual(db.count(), 0)
 
-    async def test_empty_evidence_is_irrelevant_for_this_test(self):
-        async def no_public_evidence(**_kwargs):
+    async def test_empty_evidence_fails_closed(self):
+        async def no_public_evidence(*_args):
             return {"narrative_evidence": [], "attention_evidence": []}
 
         with tempfile.TemporaryDirectory() as directory:
             db = TrackerDatabase(Path(directory) / "tracker.db")
             result = await evaluate_and_record(
                 {"address": "NoEvidenceMint", "market_cap": 12000},
-                database=db,
-                evidence_collector=no_public_evidence,
+                database=db, evidence_collector=no_public_evidence,
             )
-            self.assertEqual(result["status"], "qualified")
-            self.assertEqual(db.count(), 1)
+            self.assertEqual(result["status"], "rejected")
+            self.assertEqual(db.count(), 0)
 
     async def test_existing_database_queue_schema_is_upgraded_in_place(self):
         import sqlite3
