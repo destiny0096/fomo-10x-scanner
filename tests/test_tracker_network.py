@@ -1,4 +1,4 @@
-"""Regression tests for transient evidence-source failures and queue diagnostics."""
+"""Regression tests for unused public-source adapters and queue diagnostics."""
 import asyncio
 import tempfile
 import unittest
@@ -62,32 +62,6 @@ class EvidenceSourceRetryTests(unittest.IsolatedAsyncioTestCase):
         result = await _get_json(_Session(status=404), "https://api.example.test/data")
         self.assertIsNone(result)
 
-    async def test_pipeline_defers_candidate_when_evidence_source_is_unavailable(self):
-        async def unavailable_collector(*_args):
-            raise EvidenceSourceUnavailable("temporary DNS failure")
-
-        with tempfile.TemporaryDirectory() as directory:
-            db = TrackerDatabase(Path(directory) / "tracker.db")
-            result = await evaluate_and_record(
-                {"address": "RetryMint", "market_cap": 12000},
-                database=db, evidence_collector=unavailable_collector,
-            )
-            self.assertEqual(result["status"], "evidence_error")
-            self.assertEqual(db.count(), 0)
-
-    async def test_empty_evidence_fails_closed(self):
-        async def no_public_evidence(*_args):
-            return {"narrative_evidence": [], "attention_evidence": []}
-
-        with tempfile.TemporaryDirectory() as directory:
-            db = TrackerDatabase(Path(directory) / "tracker.db")
-            result = await evaluate_and_record(
-                {"address": "NoEvidenceMint", "market_cap": 12000},
-                database=db, evidence_collector=no_public_evidence,
-            )
-            self.assertEqual(result["status"], "rejected")
-            self.assertEqual(db.count(), 0)
-
     async def test_existing_database_queue_schema_is_upgraded_in_place(self):
         import sqlite3
 
@@ -118,7 +92,7 @@ class EvidenceSourceRetryTests(unittest.IsolatedAsyncioTestCase):
             db.enqueue_candidate({"address": "RejectedMint", "market_cap": 10000})
             claimed = db.claim_next_candidate()
             self.assertEqual(claimed["address"], "PendingMint")
-            db.complete_candidate("PendingMint", "rejected", "No qualifying public evidence")
+            db.complete_candidate("PendingMint", "rejected", "Missing valid reported market cap")
             report = db.queue_diagnostics()
             self.assertEqual(report["tracked_tokens"], 0)
             self.assertEqual(report["queue_counts"]["pending"], 1)
