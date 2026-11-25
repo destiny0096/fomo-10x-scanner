@@ -710,29 +710,40 @@ async def evaluate_pair(session, pair):
         + sell_route_text(sell_status)
     )
 
-    # Persist the outbound alert record before delivery so every successful
-    # Telegram alert has a durable journal entry across process restarts.
-    journal_db = TrackerDatabase()
-    journal_status = journal_db.prepare_alert(qualified_token)
-    if journal_status == "sent":
-        logging.info("SKIP %s: already present in sent-alert journal", address)
-        alerted.add(address)
-        candidates.pop(address, None)
-        return False
+    # The durable journal prevents duplicate alerts, but it is optional to
+    # scanner delivery: a tracker-disk failure must never stop a valid alert.
+    journal_db = None
+    try:
+        journal_db = TrackerDatabase(timeout_seconds=0.5)
+        journal_status = journal_db.prepare_alert(qualified_token)
+        if journal_status == "sent":
+            logging.info("SKIP %s: already present in sent-alert journal", address)
+            alerted.add(address)
+            candidates.pop(address, None)
+            return False
+    except Exception:
+        journal_db = None
+        logging.exception(
+            "Alert journal unavailable for %s; continuing with scanner Telegram delivery",
+            address,
+        )
+
     try:
         await tg(session, message)
     except Exception as exc:
-        try:
-            journal_db.finish_alert(address, sent=False, error=str(exc))
-        except Exception:
-            logging.exception("Could not mark failed alert journal entry for %s", address)
+        if journal_db is not None:
+            try:
+                journal_db.finish_alert(address, sent=False, error=str(exc))
+            except Exception:
+                logging.exception("Could not mark failed alert journal entry for %s", address)
         raise
-    try:
-        journal_db.finish_alert(address, sent=True)
-    except Exception:
-        # Telegram has already confirmed delivery. Keep the scanner's in-memory
-        # dedupe state and report the journal write failure for operator review.
-        logging.exception("Telegram sent but alert journal finalization failed for %s", address)
+    if journal_db is not None:
+        try:
+            journal_db.finish_alert(address, sent=True)
+        except Exception:
+            # Telegram has already confirmed delivery. Keep the scanner's in-memory
+            # dedupe state and report the journal write failure for operator review.
+            logging.exception("Telegram sent but alert journal finalization failed for %s", address)
 
     # Telegram has succeeded: commit scanner-side alert bookkeeping first.
     # Tracker scheduling is optional and must never cause a duplicate scanner alert.
