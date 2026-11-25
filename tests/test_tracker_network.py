@@ -7,7 +7,6 @@ from pathlib import Path
 import aiohttp
 
 from tracker.database import TrackerDatabase
-from tracker.pipeline import evaluate_and_record
 from tracker.sources import EvidenceSourceUnavailable, _get_json, _get_text
 
 
@@ -100,7 +99,7 @@ class EvidenceSourceRetryTests(unittest.IsolatedAsyncioTestCase):
             completed = next(row for row in report["recent_candidates"]
                              if row["address"] == "PendingMint")
             self.assertEqual(completed["result_status"], "rejected")
-            self.assertEqual(completed["result_reason"], "No qualifying public evidence")
+            self.assertEqual(completed["result_reason"], "Missing valid reported market cap")
             self.assertTrue(report["database_path"].endswith("tracker.db"))
 
 
