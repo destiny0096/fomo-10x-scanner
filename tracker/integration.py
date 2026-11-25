@@ -207,6 +207,12 @@ def resume_pending_tracking() -> bool:
     """Start processing candidates left pending by a previous process."""
     try:
         database = TrackerDatabase(timeout_seconds=1.0)
+        reset_requested = os.getenv("RESET_TRACKER_TEST4_TO_TEST5", "false").strip().lower() in {"1", "true", "yes", "on"}
+        if reset_requested and database.reset_test4_to_test5():
+            logger.warning(
+                "OPERATOR RESET COMPLETE: Test 4 data removed after verified backup; Test 5 active with %s qualified tokens",
+                database.count(),
+            )
         export_path = os.getenv("TRACKER_EXPORT_PATH", "").strip()
         if not export_path:
             export_path = str(database.path.parent / "tracker_results.csv")
