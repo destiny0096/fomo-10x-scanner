@@ -207,6 +207,15 @@ def resume_pending_tracking() -> bool:
     """Start processing candidates left pending by a previous process."""
     try:
         database = TrackerDatabase(timeout_seconds=1.0)
+        export_path = os.getenv("TRACKER_EXPORT_PATH", "").strip()
+        if not export_path:
+            export_path = str(database.path.parent / "tracker_results.csv")
+        if database.recover_completed_cohort_from_export(export_path):
+            logger.warning(
+                "Recovered completed tracker cohort from its matching delivered CSV; "
+                "Test %s is now active with %s qualified tokens",
+                database.current_test_number(), database.count(),
+            )
         _log_queue_diagnostics(database, "startup/resume")
         candidate_started = (
             True if database.pending_candidate_count() == 0 else _start_candidate_worker()
