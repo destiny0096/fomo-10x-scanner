@@ -4,9 +4,9 @@ This document is intentionally strict. A green unit-test run does not prove that
 
 ## 1. Keep the production scanner safe
 
-- Keep Deplexo OFF while preparing this release.
-- Do not run the new branch against the production Telegram chat during preflight.
-- Do not merge `feature/fomo-tracker-test-4` into `main` until the owner reviews and approves the release.
+- Keep the existing Deplexo application and persistent database in place.
+- Do not create a replacement app or reset the tracker database.
+- Deploy the reviewed fix to the existing application only after the branch is merged.
 - Do not change scanner thresholds as part of tracker deployment.
 - Keep the current production deployment/configuration available for rollback.
 
@@ -64,7 +64,7 @@ Expected checks:
 - DexScreener public API responds;
 - Reddit public search responds.
 
-The command uses Telegram read-only endpoints only. It does not send a message or expose the bot token. Any FAIL is a go-live blocker. A Reddit outage may be transient; retry later rather than weakening the attention qualification gate.
+The command uses Telegram read-only endpoints only. It does not send a message or expose the bot token. Any FAIL is a go-live blocker. Reddit availability is irrelevant to this release and must not block deployment.
 
 ## 4. Controlled live smoke test (requires explicit owner approval)
 
@@ -74,8 +74,8 @@ After preflight passes and a deployment is explicitly approved:
 2. Confirm startup logs show the health server, pending queue recovery, and market-cap monitor.
 3. Confirm `/health` returns HTTP 200. This proves liveness only.
 4. Send a separately approved test message to the intended Telegram destination using the existing bot, or verify an ordinary scanner alert when one naturally occurs. Do not manufacture a token alert or relax scanner filters just to force a test.
-5. Confirm one real scanner alert is followed by a durable candidate-queue row and tracker evidence evaluation in logs/database.
-6. Confirm a qualified candidate is inserted only when both narrative and attention evidence pass. A rejected token should remain out of the 100-token cohort.
+5. Confirm one real scanner alert is followed by a durable candidate-queue row and address/market-cap qualification in logs/database.
+6. Confirm a successfully alerted token with valid reported marketCap is inserted into the active 100-token cohort. Missing/invalid marketCap must remain out of the cohort.
 7. Confirm market-cap updates use reported `marketCap`, not FDV.
 8. Confirm a timestamped backup appears under `/data/tracker_backups` and passes SQLite integrity validation.
 9. Confirm no unexpected repeated Telegram alerts, restart loops, or database errors.
