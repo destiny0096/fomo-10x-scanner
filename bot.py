@@ -12,6 +12,7 @@ from security_test import check_security, security_summary
 from lp_test import check_lp_status, lp_status_text
 from sell_route_test import check_sell_route, sell_route_text
 from tracker.integration import deliver_pending_notifications, drain_tracking_tasks, resume_pending_tracking, schedule_tracking
+from tracker.pipeline import evaluate_candidate
 from tracker.market_monitor import market_cap_monitor
 
 
@@ -657,6 +658,34 @@ async def evaluate_pair(session, pair):
         address,
     )
 
+    # Narrative and attention are mandatory gates BEFORE Telegram distribution.
+    # Use reported marketCap only; never relabel FDV as market cap for the tracker.
+    evidence_result = await evaluate_candidate({
+        "address": address,
+        "name": token.get("name", ""),
+        "symbol": token.get("symbol", ""),
+        "market_cap": pair.get("marketCap"),
+    })
+    if evidence_result.get("status") != "qualified":
+        logging.info(
+            "REJECT %s: narrative/attention gate status=%s reason=%s",
+            token.get("symbol"), evidence_result.get("status"),
+            evidence_result.get("reason", ""),
+        )
+        return False
+
+    qualified_token = evidence_result["candidate"]
+    narrative_lines = qualified_token.get("narrative_evidence") or []
+    attention_lines = qualified_token.get("attention_evidence") or []
+    narrative_text = "\\n".join(
+        f"• {item.get('source', 'Source')}: {item.get('summary', '')}"
+        for item in narrative_lines if isinstance(item, dict)
+    )
+    attention_text = "\\n".join(
+        f"• {item.get('source', 'Source')}: {item.get('summary', '')}"
+        for item in attention_lines if isinstance(item, dict)
+    )
+
     message = (
         alert(
             pair,
@@ -668,11 +697,15 @@ async def evaluate_pair(session, pair):
             momentum,
             buy_pressure,
         )
-        + "\n\n🛡️ SECURITY\n"
+        + "\\n\\n🧠 NARRATIVE CHECK — PASS\\n"
+        + narrative_text
+        + "\\n\\n👀 ATTENTION CHECK — PASS\\n"
+        + attention_text
+        + "\\n\\n🛡️ SECURITY\\n"
         + security_summary(security)
-        + "\n\n"
+        + "\\n\\n"
         + lp_status_text(lp_status)
-        + "\n\n"
+        + "\\n\\n"
         + sell_route_text(sell_status)
     )
 
@@ -687,12 +720,7 @@ async def evaluate_pair(session, pair):
     # The scanner may use FDV as a fallback for its existing alert filter.
     # The tracker must receive reported marketCap only, never FDV mislabeled as MC.
     try:
-        schedule_tracking({
-            "address": address,
-            "name": token.get("name", ""),
-            "symbol": token.get("symbol", ""),
-            "market_cap": pair.get("marketCap"),
-        })
+        schedule_tracking(qualified_token)
     except Exception:
         logging.exception(
             "Tracker scheduling failed for %s; scanner alert remains recorded",
