@@ -17,14 +17,18 @@ ATTENTION = [{"source":"Reddit public search","url":"https://www.reddit.com/r/ex
 
 
 class QualificationTests(unittest.TestCase):
-    def test_narrative_and_attention_are_required(self):
-        result = qualify_token({"address": "Mint111"})
-        self.assertFalse(result.qualified)
-        self.assertFalse(result.narrative_pass)
-        self.assertFalse(result.attention_pass)
+    def test_address_and_reported_market_cap_are_sufficient(self):
+        result = qualify_token({"address": "Mint111", "market_cap": 10000})
+        self.assertTrue(result.qualified)
+        self.assertTrue(result.narrative_pass)
+        self.assertTrue(result.attention_pass)
 
     def test_missing_address_is_rejected(self):
         self.assertFalse(qualify_token({"market_cap": 10000}).qualified)
+
+    def test_missing_or_invalid_market_cap_is_rejected(self):
+        for value in (None, 0, -1, float("nan"), float("inf")):
+            self.assertFalse(qualify_token({"address": "Mint111", "market_cap": value}).qualified)
 
 
 class PersistenceTests(unittest.TestCase):
