@@ -13,6 +13,7 @@ from lp_test import check_lp_status, lp_status_text
 from sell_route_test import check_sell_route, sell_route_text
 from tracker.integration import deliver_pending_notifications, drain_tracking_tasks, resume_pending_tracking, schedule_tracking
 from tracker.pipeline import evaluate_candidate
+from tracker.database import TrackerDatabase
 from tracker.market_monitor import market_cap_monitor
 
 
@@ -709,8 +710,29 @@ async def evaluate_pair(session, pair):
         + sell_route_text(sell_status)
     )
 
-    # Only mark the token alerted after Telegram confirms success.
-    await tg(session, message)
+    # Persist the outbound alert record before delivery so every successful
+    # Telegram alert has a durable journal entry across process restarts.
+    journal_db = TrackerDatabase()
+    journal_status = journal_db.prepare_alert(qualified_token)
+    if journal_status == "sent":
+        logging.info("SKIP %s: already present in sent-alert journal", address)
+        alerted.add(address)
+        candidates.pop(address, None)
+        return False
+    try:
+        await tg(session, message)
+    except Exception as exc:
+        try:
+            journal_db.finish_alert(address, sent=False, error=str(exc))
+        except Exception:
+            logging.exception("Could not mark failed alert journal entry for %s", address)
+        raise
+    try:
+        journal_db.finish_alert(address, sent=True)
+    except Exception:
+        # Telegram has already confirmed delivery. Keep the scanner's in-memory
+        # dedupe state and report the journal write failure for operator review.
+        logging.exception("Telegram sent but alert journal finalization failed for %s", address)
 
     # Telegram has succeeded: commit scanner-side alert bookkeeping first.
     # Tracker scheduling is optional and must never cause a duplicate scanner alert.
